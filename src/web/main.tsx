@@ -25,6 +25,7 @@ type ResumoObra = {
 type Lancamento = { id: number; descricao: string; valor: number; tipo: string; data: string; data_venc: string | null; status: string }
 type Colaborador = { id: number; nome: string; funcao: string | null; setor: string | null; status: string; salario_base: number }
 type Produto = { id: number; codigo: string; nome: string; unidade: string | null; estoque_atual: number; estoque_minimo: number; valor_unitario: number }
+type ResumoMaster = { obras: number; usuarios: number; supervisores: number; administradores: number }
 type OpcaoFinanceira = { id: number; nome: string }
 
 const nomesPerfil: Record<string, string> = {
@@ -40,6 +41,7 @@ function PortalWeb() {
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [colaboradoresWeb, setColaboradoresWeb] = useState<Colaborador[]>([])
   const [produtosWeb, setProdutosWeb] = useState<Produto[]>([])
+  const [resumoMaster, setResumoMaster] = useState<ResumoMaster | null>(null)
   const [categoriasWeb, setCategoriasWeb] = useState<OpcaoFinanceira[]>([])
   const [contasWeb, setContasWeb] = useState<OpcaoFinanceira[]>([])
   const [pagina, setPagina] = useState<'inicio' | 'financeiro' | 'rh' | 'estoque'>('inicio')
@@ -72,6 +74,16 @@ function PortalWeb() {
     else {
       setPerfil(data)
       setPagina(data.perfil === 'almoxarife' ? 'estoque' : 'inicio')
+      if (data.perfil === 'master') {
+        const [obras, usuarios] = await Promise.all([
+          supabase.from('empresas').select('id'),
+          supabase.from('usuarios').select('perfil,ativo'),
+        ])
+        if (!obras.error && !usuarios.error) {
+          const ativos = (usuarios.data ?? []).filter(item => !!item.ativo)
+          setResumoMaster({ obras: obras.data?.length ?? 0, usuarios: ativos.length, supervisores: ativos.filter(item => item.perfil === 'supervisor').length, administradores: ativos.filter(item => item.perfil === 'admin').length })
+        }
+      }
       const [colaboradores, lancamentos] = await Promise.all([
         supabase.from('colaboradores').select('nome,funcao,nascimento,salario_base').eq('empresa_id', data.empresa_id).eq('status', 'ativo'),
         supabase.from('lancamentos').select('id,descricao,valor,tipo,data,status').eq('empresa_id', data.empresa_id).order('created_at', { ascending: false }).limit(5),
@@ -216,9 +228,7 @@ function PortalWeb() {
         {['admin', 'gestor'].includes(perfil.perfil) && <button className={pagina === 'inicio' ? 'flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('inicio')}><LayoutDashboard size={16} />Início</button>}
         <div className="my-3 border-t border-surface-border" />
         {perfil.perfil === 'admin' && <><p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Recursos Humanos</p><button className={pagina === 'rh' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('rh')}><UsersRound size={15} />Colaboradores</button></>}
-        <div className="my-3 border-t border-surface-border" />
-        <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Almoxarifado</p>
-        <button className={pagina === 'estoque' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('estoque')}><Boxes size={15} />Estoque</button>
+        {['admin', 'gestor', 'almoxarife'].includes(perfil.perfil) && <><div className="my-3 border-t border-surface-border" /><p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Almoxarifado</p><button className={pagina === 'estoque' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('estoque')}><Boxes size={15} />Estoque</button></>}
         <div className="my-3 border-t border-surface-border" />
         <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Financeiro</p>
         {perfil.perfil === 'admin' && <button className={pagina === 'financeiro' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('financeiro')}><Wallet size={15} />Lançamentos</button>}
@@ -227,6 +237,7 @@ function PortalWeb() {
     </aside>
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden"><header className="flex h-[64px] shrink-0 items-center justify-between border-b border-surface-border bg-surface px-4 md:h-[73px] md:px-6"><div className="flex items-center gap-3"><button className="rounded-lg p-2 text-gray-300 hover:bg-surface-hover md:hidden" aria-label="Abrir menu" onClick={() => setMenuAberto(aberto => !aberto)}>{menuAberto ? <X size={20} /> : <Menu size={20} />}</button><div><p className="text-xs text-gray-500">ADM PRO WEB</p><h1 className="text-lg font-semibold">{pagina === 'inicio' ? 'Painel Inicial' : pagina === 'rh' ? 'Colaboradores' : pagina === 'estoque' ? 'Estoque' : 'Lançamentos'}</h1></div></div><p className="hidden text-sm text-gray-400 sm:block">{perfil.email}</p></header><main className="flex-1 overflow-y-auto p-4 md:p-6">
       {erro && <p className="mt-6 rounded-md bg-red-950/50 p-3 text-sm text-red-300">{erro}</p>}
+      {perfil.perfil === 'master' && resumoMaster && <section className="mt-7"><h2 className="mb-4 text-lg font-semibold">Painel Administrador</h2><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Obras</p><p className="mt-2 text-3xl font-bold">{resumoMaster.obras}</p></div><div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Usuários ativos</p><p className="mt-2 text-3xl font-bold">{resumoMaster.usuarios}</p></div><div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Supervisores</p><p className="mt-2 text-3xl font-bold">{resumoMaster.supervisores}</p></div><div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Administradores</p><p className="mt-2 text-3xl font-bold">{resumoMaster.administradores}</p></div></div></section>}
       {resumo && pagina === 'inicio' && <section className="mt-8">
         <h2 className="mb-4 text-lg font-semibold">Painel inicial</h2>
         <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
