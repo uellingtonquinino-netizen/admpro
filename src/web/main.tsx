@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { Session } from '@supabase/supabase-js'
-import { Building2, LayoutDashboard, LogOut, Menu, UsersRound, Wallet, X } from 'lucide-react'
+import { Boxes, Building2, LayoutDashboard, LogOut, Menu, UsersRound, Wallet, X } from 'lucide-react'
 import { supabase } from './supabase'
 import '../renderer/index.css'
 
@@ -24,6 +24,7 @@ type ResumoObra = {
 
 type Lancamento = { id: number; descricao: string; valor: number; tipo: string; data: string; data_venc: string | null; status: string }
 type Colaborador = { id: number; nome: string; funcao: string | null; setor: string | null; status: string; salario_base: number }
+type Produto = { id: number; codigo: string; nome: string; unidade: string | null; estoque_atual: number; estoque_minimo: number; valor_unitario: number }
 type OpcaoFinanceira = { id: number; nome: string }
 
 const nomesPerfil: Record<string, string> = {
@@ -38,9 +39,10 @@ function PortalWeb() {
   const [resumo, setResumo] = useState<ResumoObra | null>(null)
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [colaboradoresWeb, setColaboradoresWeb] = useState<Colaborador[]>([])
+  const [produtosWeb, setProdutosWeb] = useState<Produto[]>([])
   const [categoriasWeb, setCategoriasWeb] = useState<OpcaoFinanceira[]>([])
   const [contasWeb, setContasWeb] = useState<OpcaoFinanceira[]>([])
-  const [pagina, setPagina] = useState<'inicio' | 'financeiro' | 'rh'>('inicio')
+  const [pagina, setPagina] = useState<'inicio' | 'financeiro' | 'rh' | 'estoque'>('inicio')
   const [menuAberto, setMenuAberto] = useState(false)
   const [novoLancamento, setNovoLancamento] = useState(false)
   const [salvandoLancamento, setSalvandoLancamento] = useState(false)
@@ -108,6 +110,9 @@ function PortalWeb() {
           .limit(200)
         if (erroColaboradores) setErro('Não foi possível carregar os colaboradores.')
         else setColaboradoresWeb(listaColaboradores ?? [])
+        const { data: produtos, error: erroProdutos } = await supabase.from('produtos').select('id,codigo,nome,unidade,estoque_atual,estoque_minimo,valor_unitario').eq('empresa_id', data.empresa_id).order('nome')
+        if (erroProdutos) setErro('Não foi possível carregar o estoque.')
+        else setProdutosWeb(produtos ?? [])
         const [categorias, contas] = await Promise.all([
           supabase.from('categorias').select('id,nome').eq('empresa_id', data.empresa_id).order('nome'),
           supabase.from('contas').select('id,nome').eq('empresa_id', data.empresa_id).order('nome'),
@@ -199,11 +204,11 @@ function PortalWeb() {
     </main>
   }
 
-  const navegar = (destino: 'inicio' | 'financeiro' | 'rh') => { setPagina(destino); setMenuAberto(false) }
+  const navegar = (destino: 'inicio' | 'financeiro' | 'rh' | 'estoque') => { setPagina(destino); setMenuAberto(false) }
 
   return <div className="flex h-screen overflow-hidden bg-background text-white">
     {menuAberto && <button aria-label="Fechar menu" className="fixed inset-0 z-20 bg-black/60 md:hidden" onClick={() => setMenuAberto(false)} />}
-    <aside className={`fixed inset-y-0 left-0 z-30 flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface px-3 py-4 transition-transform md:static md:translate-x-0 ${menuAberto ? 'translate-x-0' : '-translate-x-full'}`}>
+    <aside className={`fixed inset-y-0 left-0 z-30 flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface px-3 py-4 transition-transform md:relative md:translate-x-0 ${menuAberto ? 'translate-x-0' : '-translate-x-full'}`}>
       <div className="mb-8 flex items-center gap-2.5 px-2"><div className="grid h-8 w-8 place-items-center rounded-lg bg-brand-500"><Building2 size={16} /></div><div className="min-w-0"><p className="text-xs font-bold">ADM PRO</p><p className="truncate text-[11px] text-gray-500">Versão web</p></div></div>
       <nav className="flex-1 space-y-1">
         <button className={pagina === 'inicio' ? 'flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('inicio')}><LayoutDashboard size={16} />Início</button>
@@ -211,22 +216,25 @@ function PortalWeb() {
         <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Recursos Humanos</p>
         <button className={pagina === 'rh' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('rh')}><UsersRound size={15} />Colaboradores</button>
         <div className="my-3 border-t border-surface-border" />
+        <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Almoxarifado</p>
+        <button className={pagina === 'estoque' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('estoque')}><Boxes size={15} />Estoque</button>
+        <div className="my-3 border-t border-surface-border" />
         <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Financeiro</p>
         <button className={pagina === 'financeiro' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('financeiro')}><Wallet size={15} />Lançamentos</button>
       </nav>
       <div className="border-t border-surface-border pt-4"><div className="flex items-center gap-2.5 px-2"><div className="grid h-7 w-7 place-items-center rounded-full bg-brand-500/10 text-xs font-bold text-brand-400">{perfil.nome.slice(0, 2).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-gray-200">{perfil.nome}</p><p className="truncate text-[11px] text-gray-500">{nomesPerfil[perfil.perfil] ?? perfil.perfil}</p></div><button title="Sair" className="rounded-lg p-1.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400" onClick={() => void supabase.auth.signOut()}><LogOut size={14} /></button></div></div>
     </aside>
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden"><header className="flex h-[64px] shrink-0 items-center justify-between border-b border-surface-border bg-surface px-4 md:h-[73px] md:px-6"><div className="flex items-center gap-3"><button className="rounded-lg p-2 text-gray-300 hover:bg-surface-hover md:hidden" aria-label="Abrir menu" onClick={() => setMenuAberto(aberto => !aberto)}>{menuAberto ? <X size={20} /> : <Menu size={20} />}</button><div><p className="text-xs text-gray-500">ADM PRO WEB</p><h1 className="text-lg font-semibold">{pagina === 'inicio' ? 'Painel Inicial' : pagina === 'rh' ? 'Colaboradores' : 'Lançamentos'}</h1></div></div><p className="hidden text-sm text-gray-400 sm:block">{perfil.email}</p></header><main className="flex-1 overflow-y-auto p-4 md:p-6">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden"><header className="flex h-[64px] shrink-0 items-center justify-between border-b border-surface-border bg-surface px-4 md:h-[73px] md:px-6"><div className="flex items-center gap-3"><button className="rounded-lg p-2 text-gray-300 hover:bg-surface-hover md:hidden" aria-label="Abrir menu" onClick={() => setMenuAberto(aberto => !aberto)}>{menuAberto ? <X size={20} /> : <Menu size={20} />}</button><div><p className="text-xs text-gray-500">ADM PRO WEB</p><h1 className="text-lg font-semibold">{pagina === 'inicio' ? 'Painel Inicial' : pagina === 'rh' ? 'Colaboradores' : pagina === 'estoque' ? 'Estoque' : 'Lançamentos'}</h1></div></div><p className="hidden text-sm text-gray-400 sm:block">{perfil.email}</p></header><main className="flex-1 overflow-y-auto p-4 md:p-6">
       {erro && <p className="mt-6 rounded-md bg-red-950/50 p-3 text-sm text-red-300">{erro}</p>}
       {resumo && pagina === 'inicio' && <section className="mt-8">
         <h2 className="mb-4 text-lg font-semibold">Painel inicial</h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
           <div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Colaboradores ativos</p><p className="mt-2 text-3xl font-bold">{resumo.ativos}</p></div>
           <div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Custo de folha</p><p className="mt-2 text-3xl font-bold">{resumo.custoFolha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-5"><p className="text-sm text-amber-100">Média de idade</p><p className="mt-2 text-3xl font-bold text-amber-300">{resumo.mediaIdade ? `${resumo.mediaIdade} anos` : '—'}</p></div>
           <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 p-5"><p className="text-sm text-purple-100">Aniversariantes do mês</p><p className="mt-2 text-3xl font-bold text-purple-300">{resumo.aniversariantes.length}</p></div>
         </div>
-        <div className="mt-5 grid gap-5 xl:grid-cols-3"><div className="rounded-lg border border-surface-border bg-surface p-5 xl:col-span-2"><h3 className="font-medium">Colaboradores por função</h3><div className="mt-4 space-y-4">{resumo.porFuncao.length === 0 ? <p className="text-sm text-gray-400">Sem funções cadastradas.</p> : resumo.porFuncao.map(item => <div key={item.funcao}><div className="flex justify-between gap-4 text-sm"><strong>{item.funcao}</strong><span className="text-gray-400">{item.quantidade} · {item.custo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-hover"><div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.max(6, (item.quantidade / resumo.ativos) * 100)}%` }} /></div></div>)}</div></div><div className="rounded-lg border border-surface-border bg-surface p-5"><h3 className="font-medium">Aniversariantes do mês</h3><div className="mt-3 space-y-3">{resumo.aniversariantes.length === 0 ? <p className="text-sm text-gray-400">Nenhum aniversariante neste mês.</p> : resumo.aniversariantes.map(item => <div key={`${item.nome}-${item.nascimento}`} className="flex gap-3"><span className="grid h-8 w-8 place-items-center rounded-lg bg-purple-500/15 text-xs text-purple-300">{item.nascimento.slice(8, 10)}</span><div className="min-w-0"><p className="truncate text-sm font-medium">{item.nome}</p><p className="truncate text-xs text-gray-400">{item.funcao ?? '—'}</p></div></div>)}</div></div></div>
+        <div className="mt-5 grid gap-5 2xl:grid-cols-3"><div className="rounded-lg border border-surface-border bg-surface p-5 2xl:col-span-2"><h3 className="font-medium">Colaboradores por função</h3><div className="mt-4 space-y-4">{resumo.porFuncao.length === 0 ? <p className="text-sm text-gray-400">Sem funções cadastradas.</p> : resumo.porFuncao.map(item => <div key={item.funcao}><div className="flex justify-between gap-4 text-sm"><strong>{item.funcao}</strong><span className="text-gray-400">{item.quantidade} · {item.custo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-hover"><div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.max(6, (item.quantidade / resumo.ativos) * 100)}%` }} /></div></div>)}</div></div><div className="rounded-lg border border-surface-border bg-surface p-5"><h3 className="font-medium">Aniversariantes do mês</h3><div className="mt-3 space-y-3">{resumo.aniversariantes.length === 0 ? <p className="text-sm text-gray-400">Nenhum aniversariante neste mês.</p> : resumo.aniversariantes.map(item => <div key={`${item.nome}-${item.nascimento}`} className="flex gap-3"><span className="grid h-8 w-8 place-items-center rounded-lg bg-purple-500/15 text-xs text-purple-300">{item.nascimento.slice(8, 10)}</span><div className="min-w-0"><p className="truncate text-sm font-medium">{item.nome}</p><p className="truncate text-xs text-gray-400">{item.funcao ?? '—'}</p></div></div>)}</div></div></div>
         <div className="mt-5 rounded-lg border border-surface-border bg-surface p-5">
           <h3 className="font-medium">Últimos lançamentos</h3>
           <div className="mt-3 divide-y divide-surface-border">
@@ -249,6 +257,7 @@ function PortalWeb() {
         {novoColaborador && <form onSubmit={salvarColaborador} className="mb-5 grid gap-3 rounded-lg border border-surface-border bg-surface p-4 md:grid-cols-2"><label className="text-sm text-gray-300 md:col-span-2">Nome completo<input className="mt-1 w-full rounded-md border border-surface-border bg-surface-card px-3 py-2 text-white" value={formColaborador.nome} onChange={e => setFormColaborador({ ...formColaborador, nome: e.target.value })} required /></label><label className="text-sm text-gray-300">Função<input className="mt-1 w-full rounded-md border border-surface-border bg-surface-card px-3 py-2 text-white" value={formColaborador.funcao} onChange={e => setFormColaborador({ ...formColaborador, funcao: e.target.value })} /></label><label className="text-sm text-gray-300">Setor<input className="mt-1 w-full rounded-md border border-surface-border bg-surface-card px-3 py-2 text-white" value={formColaborador.setor} onChange={e => setFormColaborador({ ...formColaborador, setor: e.target.value })} /></label><label className="text-sm text-gray-300">Data de admissão<input className="mt-1 w-full rounded-md border border-surface-border bg-surface-card px-3 py-2 text-white" type="date" value={formColaborador.data_admissao} onChange={e => setFormColaborador({ ...formColaborador, data_admissao: e.target.value })} /></label><label className="text-sm text-gray-300">Salário base<input className="mt-1 w-full rounded-md border border-surface-border bg-surface-card px-3 py-2 text-white" min="0" step="0.01" type="number" value={formColaborador.salario_base} onChange={e => setFormColaborador({ ...formColaborador, salario_base: e.target.value })} /></label><div className="md:col-span-2"><button className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60" disabled={salvandoColaborador}>{salvandoColaborador ? 'Salvando…' : 'Cadastrar colaborador'}</button></div></form>}
         <div className="overflow-x-auto rounded-lg border border-surface-border"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-surface text-gray-400"><tr><th className="p-3">Nome</th><th className="p-3">Função</th><th className="p-3">Setor</th><th className="p-3">Status</th><th className="p-3 text-right">Salário base</th></tr></thead><tbody>{colaboradoresWeb.length === 0 ? <tr><td className="p-4 text-gray-400" colSpan={5}>Nenhum colaborador encontrado.</td></tr> : colaboradoresWeb.map(item => <tr key={item.id} className="border-t border-surface-border"><td className="p-3 font-medium">{item.nome}</td><td className="p-3 text-gray-300">{item.funcao ?? '—'}</td><td className="p-3 text-gray-300">{item.setor ?? '—'}</td><td className="p-3"><span className={item.status === 'ativo' ? 'rounded bg-emerald-500/10 px-2 py-1 text-xs text-emerald-300' : 'rounded bg-gray-500/10 px-2 py-1 text-xs text-gray-400'}>{item.status}</span></td><td className="p-3 text-right">{Number(item.salario_base).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>)}</tbody></table></div>
       </section>}
+      {pagina === 'estoque' && <section className="mt-7"><div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold">Produtos em estoque</h2><span className="text-sm text-gray-400">{produtosWeb.length} itens</span></div><div className="overflow-x-auto rounded-lg border border-surface-border"><table className="w-full min-w-[640px] text-left text-sm"><thead className="bg-surface text-gray-400"><tr><th className="p-3">Código</th><th className="p-3">Produto</th><th className="p-3">Estoque</th><th className="p-3 text-right">Valor unitário</th></tr></thead><tbody>{produtosWeb.map(item => <tr key={item.id} className="border-t border-surface-border"><td className="p-3 text-gray-400">{item.codigo}</td><td className="p-3 font-medium">{item.nome}</td><td className={Number(item.estoque_atual) <= Number(item.estoque_minimo) ? 'p-3 text-amber-300' : 'p-3'}>{item.estoque_atual} {item.unidade ?? ''}</td><td className="p-3 text-right">{Number(item.valor_unitario).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>)}</tbody></table></div></section>}
       <div className="mt-6 rounded-lg border border-blue-500/30 bg-blue-500/10 p-5 text-sm text-blue-100">Seu acesso web está autenticado pelo Supabase. Outros módulos serão disponibilizados gradualmente, mantendo as mesmas permissões do aplicativo desktop.</div>
     </main></div>
   </div>
