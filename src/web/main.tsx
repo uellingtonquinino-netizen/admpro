@@ -128,7 +128,7 @@ function PortalWeb() {
           setResumoMaster({ obras: obras.data?.length ?? 0, usuarios: ativos.length, supervisores: ativos.filter(item => item.perfil === 'supervisor').length, administradores: ativos.filter(item => item.perfil === 'admin').length })
           setObrasMaster(obras.data ?? [])
           setUsuariosMaster(usuarios.data ?? [])
-        }
+        } else setErro('Não foi possível carregar a estrutura administrativa.')
         setCarregando(false)
         return
       }
