@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { Session } from '@supabase/supabase-js'
-import { Building2, LayoutDashboard, LogOut, UsersRound, Wallet } from 'lucide-react'
+import { Building2, LayoutDashboard, LogOut, Menu, UsersRound, Wallet, X } from 'lucide-react'
 import { supabase } from './supabase'
 import '../renderer/index.css'
 
@@ -38,6 +38,7 @@ function PortalWeb() {
   const [categoriasWeb, setCategoriasWeb] = useState<OpcaoFinanceira[]>([])
   const [contasWeb, setContasWeb] = useState<OpcaoFinanceira[]>([])
   const [pagina, setPagina] = useState<'inicio' | 'financeiro' | 'rh'>('inicio')
+  const [menuAberto, setMenuAberto] = useState(false)
   const [novoLancamento, setNovoLancamento] = useState(false)
   const [salvandoLancamento, setSalvandoLancamento] = useState(false)
   const [formLancamento, setFormLancamento] = useState({ descricao: '', valor: '', tipo: 'despesa', data: new Date().toISOString().slice(0, 10), data_venc: '', categoria_id: '', conta_id: '' })
@@ -184,21 +185,24 @@ function PortalWeb() {
     </main>
   }
 
+  const navegar = (destino: 'inicio' | 'financeiro' | 'rh') => { setPagina(destino); setMenuAberto(false) }
+
   return <div className="flex h-screen overflow-hidden bg-background text-white">
-    <aside className="flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface px-3 py-4">
+    {menuAberto && <button aria-label="Fechar menu" className="fixed inset-0 z-20 bg-black/60 md:hidden" onClick={() => setMenuAberto(false)} />}
+    <aside className={`fixed inset-y-0 left-0 z-30 flex w-60 shrink-0 flex-col border-r border-surface-border bg-surface px-3 py-4 transition-transform md:static md:translate-x-0 ${menuAberto ? 'translate-x-0' : '-translate-x-full'}`}>
       <div className="mb-8 flex items-center gap-2.5 px-2"><div className="grid h-8 w-8 place-items-center rounded-lg bg-brand-500"><Building2 size={16} /></div><div className="min-w-0"><p className="text-xs font-bold">ADM PRO</p><p className="truncate text-[11px] text-gray-500">Versão web</p></div></div>
       <nav className="flex-1 space-y-1">
-        <button className={pagina === 'inicio' ? 'flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover'} onClick={() => setPagina('inicio')}><LayoutDashboard size={16} />Início</button>
+        <button className={pagina === 'inicio' ? 'flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('inicio')}><LayoutDashboard size={16} />Início</button>
         <div className="my-3 border-t border-surface-border" />
         <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Recursos Humanos</p>
-        <button className={pagina === 'rh' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => setPagina('rh')}><UsersRound size={15} />Colaboradores</button>
+        <button className={pagina === 'rh' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('rh')}><UsersRound size={15} />Colaboradores</button>
         <div className="my-3 border-t border-surface-border" />
         <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Financeiro</p>
-        <button className={pagina === 'financeiro' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => setPagina('financeiro')}><Wallet size={15} />Lançamentos</button>
+        <button className={pagina === 'financeiro' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('financeiro')}><Wallet size={15} />Lançamentos</button>
       </nav>
       <div className="border-t border-surface-border pt-4"><div className="flex items-center gap-2.5 px-2"><div className="grid h-7 w-7 place-items-center rounded-full bg-brand-500/10 text-xs font-bold text-brand-400">{perfil.nome.slice(0, 2).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-gray-200">{perfil.nome}</p><p className="truncate text-[11px] text-gray-500">{nomesPerfil[perfil.perfil] ?? perfil.perfil}</p></div><button title="Sair" className="rounded-lg p-1.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400" onClick={() => void supabase.auth.signOut()}><LogOut size={14} /></button></div></div>
     </aside>
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden"><header className="flex h-[73px] shrink-0 items-center justify-between border-b border-surface-border bg-surface px-6"><div><p className="text-xs text-gray-500">ADM PRO WEB</p><h1 className="text-lg font-semibold">{pagina === 'inicio' ? 'Painel Inicial' : pagina === 'rh' ? 'Colaboradores' : 'Lançamentos'}</h1></div><p className="text-sm text-gray-400">{perfil.email}</p></header><main className="flex-1 overflow-y-auto p-6">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden"><header className="flex h-[64px] shrink-0 items-center justify-between border-b border-surface-border bg-surface px-4 md:h-[73px] md:px-6"><div className="flex items-center gap-3"><button className="rounded-lg p-2 text-gray-300 hover:bg-surface-hover md:hidden" aria-label="Abrir menu" onClick={() => setMenuAberto(aberto => !aberto)}>{menuAberto ? <X size={20} /> : <Menu size={20} />}</button><div><p className="text-xs text-gray-500">ADM PRO WEB</p><h1 className="text-lg font-semibold">{pagina === 'inicio' ? 'Painel Inicial' : pagina === 'rh' ? 'Colaboradores' : 'Lançamentos'}</h1></div></div><p className="hidden text-sm text-gray-400 sm:block">{perfil.email}</p></header><main className="flex-1 overflow-y-auto p-4 md:p-6">
       {erro && <p className="mt-6 rounded-md bg-red-950/50 p-3 text-sm text-red-300">{erro}</p>}
       {resumo && pagina === 'inicio' && <section className="mt-8">
         <h2 className="mb-4 text-lg font-semibold">Painel inicial</h2>
