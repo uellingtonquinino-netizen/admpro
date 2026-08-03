@@ -1,11 +1,12 @@
 import { FormEvent, useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { Session } from '@supabase/supabase-js'
-import { Boxes, Building2, LayoutDashboard, LogOut, Menu, UsersRound, Wallet, X } from 'lucide-react'
+import { ArrowLeftRight, Boxes, Building2, LayoutDashboard, LogOut, MapPin, Menu, UsersRound, Wallet, X } from 'lucide-react'
 import { supabase } from './supabase'
 import '../renderer/index.css'
 
 type Perfil = {
+  id: number
   empresa_id: number
   nome: string
   email: string
@@ -26,6 +27,15 @@ type Lancamento = { id: number; descricao: string; valor: number; tipo: string; 
 type Colaborador = { id: number; nome: string; funcao: string | null; setor: string | null; status: string; salario_base: number }
 type Produto = { id: number; codigo: string; nome: string; unidade: string | null; estoque_atual: number; estoque_minimo: number; valor_unitario: number }
 type ResumoMaster = { obras: number; usuarios: number; supervisores: number; administradores: number }
+type ResumoSupervisor = {
+  obras: { id: number; nome: string; titulo_obra: string | null; estado: string | null }[]
+  colaboradores: number
+  idadeMedia: number | null
+  admissoes: number
+  desligamentos: number
+  despesas: number
+  pendencias: number
+}
 type OpcaoFinanceira = { id: number; nome: string }
 
 const nomesPerfil: Record<string, string> = {
@@ -42,9 +52,10 @@ function PortalWeb() {
   const [colaboradoresWeb, setColaboradoresWeb] = useState<Colaborador[]>([])
   const [produtosWeb, setProdutosWeb] = useState<Produto[]>([])
   const [resumoMaster, setResumoMaster] = useState<ResumoMaster | null>(null)
+  const [resumoSupervisor, setResumoSupervisor] = useState<ResumoSupervisor | null>(null)
   const [categoriasWeb, setCategoriasWeb] = useState<OpcaoFinanceira[]>([])
   const [contasWeb, setContasWeb] = useState<OpcaoFinanceira[]>([])
-  const [pagina, setPagina] = useState<'inicio' | 'financeiro' | 'rh' | 'estoque'>('inicio')
+  const [pagina, setPagina] = useState<'inicio' | 'financeiro' | 'rh' | 'estoque' | 'supervisor'>('inicio')
   const [menuAberto, setMenuAberto] = useState(false)
   const [buscaColaborador, setBuscaColaborador] = useState('')
   const [novoLancamento, setNovoLancamento] = useState(false)
@@ -66,14 +77,14 @@ function PortalWeb() {
 
     const { data, error } = await supabase
       .from('usuarios')
-      .select('empresa_id,nome,email,perfil,ativo')
+      .select('id,empresa_id,nome,email,perfil,ativo')
       .eq('auth_user_id', sessao.user.id)
       .maybeSingle()
     if (error) setErro(`Não foi possível carregar seu perfil: ${error.message}`)
     else if (!data || !data.ativo) setErro('Sua conta não está vinculada a um usuário ativo do sistema.')
     else {
       setPerfil(data)
-      setPagina(data.perfil === 'almoxarife' ? 'estoque' : 'inicio')
+      setPagina(data.perfil === 'almoxarife' ? 'estoque' : data.perfil === 'supervisor' ? 'supervisor' : 'inicio')
       if (data.perfil === 'master') {
         const [obras, usuarios] = await Promise.all([
           supabase.from('empresas').select('id'),
@@ -83,6 +94,51 @@ function PortalWeb() {
           const ativos = (usuarios.data ?? []).filter(item => !!item.ativo)
           setResumoMaster({ obras: obras.data?.length ?? 0, usuarios: ativos.length, supervisores: ativos.filter(item => item.perfil === 'supervisor').length, administradores: ativos.filter(item => item.perfil === 'admin').length })
         }
+        setCarregando(false)
+        return
+      }
+      if (data.perfil === 'supervisor') {
+        const { data: vinculos, error: erroVinculos } = await supabase
+          .from('supervisor_obras')
+          .select('empresa_id')
+          .eq('usuario_id', data.id)
+        if (erroVinculos) {
+          setErro('Não foi possível carregar as obras sob sua supervisão.')
+          setCarregando(false)
+          return
+        }
+        const empresaIds = (vinculos ?? []).map(item => item.empresa_id)
+        if (empresaIds.length === 0) {
+          setResumoSupervisor({ obras: [], colaboradores: 0, idadeMedia: null, admissoes: 0, desligamentos: 0, despesas: 0, pendencias: 0 })
+          setCarregando(false)
+          return
+        }
+        const inicioMes = new Date(); inicioMes.setDate(1)
+        const inicioMesTexto = inicioMes.toISOString().slice(0, 10)
+        const [{ data: obras, error: erroObras }, { data: colaboradores, error: erroColaboradores }, { data: lancamentos, error: erroLancamentos }, { data: autorizacoes, error: erroAutorizacoes }, { data: notas, error: erroNotas }] = await Promise.all([
+          supabase.from('empresas').select('id,nome,titulo_obra,estado').in('id', empresaIds).order('nome'),
+          supabase.from('colaboradores').select('status,nascimento,data_admissao,data_demissao').in('empresa_id', empresaIds),
+          supabase.from('lancamentos').select('valor,tipo,status,data').in('empresa_id', empresaIds),
+          supabase.from('autorizacoes_pagamento').select('lote_id,aprovado_supervisor_por').in('empresa_id', empresaIds),
+          supabase.from('notas_fiscais').select('lote_id,aprovado_supervisor_por').in('empresa_id', empresaIds),
+        ])
+        if (erroObras || erroColaboradores || erroLancamentos || erroAutorizacoes || erroNotas) {
+          setErro('Não foi possível carregar o painel de supervisão.')
+        } else {
+          const ativos = (colaboradores ?? []).filter(item => item.status === 'ativo')
+          const idades = ativos.filter(item => item.nascimento).map(item => (Date.now() - new Date(`${item.nascimento}T00:00:00`).getTime()) / 31557600000)
+          setResumoSupervisor({
+            obras: obras ?? [],
+            colaboradores: ativos.length,
+            idadeMedia: idades.length ? Math.round(idades.reduce((total, idade) => total + idade, 0) / idades.length) : null,
+            admissoes: (colaboradores ?? []).filter(item => item.data_admissao?.slice(0, 7) === inicioMesTexto.slice(0, 7)).length,
+            desligamentos: (colaboradores ?? []).filter(item => item.data_demissao?.slice(0, 7) === inicioMesTexto.slice(0, 7)).length,
+            despesas: (lancamentos ?? []).filter(item => item.tipo === 'despesa' && item.status !== 'cancelado' && item.data >= inicioMesTexto).reduce((total, item) => total + Number(item.valor), 0),
+            pendencias: (autorizacoes ?? []).filter(item => item.lote_id !== null && item.aprovado_supervisor_por === null).length + (notas ?? []).filter(item => item.lote_id !== null && item.aprovado_supervisor_por === null).length,
+          })
+        }
+        setCarregando(false)
+        return
       }
       const [colaboradores, lancamentos] = await Promise.all([
         supabase.from('colaboradores').select('nome,funcao,nascimento,salario_base').eq('empresa_id', data.empresa_id).eq('status', 'ativo'),
@@ -218,7 +274,7 @@ function PortalWeb() {
     </main>
   }
 
-  const navegar = (destino: 'inicio' | 'financeiro' | 'rh' | 'estoque') => { setPagina(destino); setMenuAberto(false) }
+  const navegar = (destino: 'inicio' | 'financeiro' | 'rh' | 'estoque' | 'supervisor') => { setPagina(destino); setMenuAberto(false) }
 
   return <div className="flex h-screen overflow-hidden bg-background text-white">
     {menuAberto && <button aria-label="Fechar menu" className="fixed inset-0 z-20 bg-black/60 md:hidden" onClick={() => setMenuAberto(false)} />}
@@ -226,6 +282,7 @@ function PortalWeb() {
       <div className="mb-8 flex items-center gap-2.5 px-2"><div className="grid h-8 w-8 place-items-center rounded-lg bg-brand-500"><Building2 size={16} /></div><div className="min-w-0"><p className="text-xs font-bold">ADM PRO</p><p className="truncate text-[11px] text-gray-500">Versão web</p></div></div>
       <nav className="flex-1 space-y-1">
         {perfil.perfil === 'master' && <button className="flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm"><Building2 size={16} />Painel Administrador</button>}
+        {perfil.perfil === 'supervisor' && <button className={pagina === 'supervisor' ? 'flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('supervisor')}><LayoutDashboard size={16} />Visão geral</button>}
         {['admin', 'gestor'].includes(perfil.perfil) && <button className={pagina === 'inicio' ? 'flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('inicio')}><LayoutDashboard size={16} />Início</button>}
         <div className="my-3 border-t border-surface-border" />
         {perfil.perfil === 'admin' && <><p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Recursos Humanos</p><button className={pagina === 'rh' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('rh')}><UsersRound size={15} />Colaboradores</button></>}
@@ -236,9 +293,10 @@ function PortalWeb() {
       </nav>
       <div className="border-t border-surface-border pt-4"><div className="flex items-center gap-2.5 px-2"><div className="grid h-7 w-7 place-items-center rounded-full bg-brand-500/10 text-xs font-bold text-brand-400">{perfil.nome.slice(0, 2).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-gray-200">{perfil.nome}</p><p className="truncate text-[11px] text-gray-500">{nomesPerfil[perfil.perfil] ?? perfil.perfil}</p></div><button title="Sair" className="rounded-lg p-1.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400" onClick={() => void supabase.auth.signOut()}><LogOut size={14} /></button></div></div>
     </aside>
-    <div className="flex min-w-0 flex-1 flex-col overflow-hidden"><header className="flex h-[64px] shrink-0 items-center justify-between border-b border-surface-border bg-surface px-4 md:h-[73px] md:px-6"><div className="flex items-center gap-3"><button className="rounded-lg p-2 text-gray-300 hover:bg-surface-hover md:hidden" aria-label="Abrir menu" onClick={() => setMenuAberto(aberto => !aberto)}>{menuAberto ? <X size={20} /> : <Menu size={20} />}</button><div><p className="text-xs text-gray-500">ADM PRO WEB</p><h1 className="text-lg font-semibold">{pagina === 'inicio' ? 'Painel Inicial' : pagina === 'rh' ? 'Colaboradores' : pagina === 'estoque' ? 'Estoque' : 'Lançamentos'}</h1></div></div><p className="hidden text-sm text-gray-400 sm:block">{perfil.email}</p></header><main className="flex-1 overflow-y-auto p-4 md:p-6">
+    <div className="flex min-w-0 flex-1 flex-col overflow-hidden"><header className="flex h-[64px] shrink-0 items-center justify-between border-b border-surface-border bg-surface px-4 md:h-[73px] md:px-6"><div className="flex items-center gap-3"><button className="rounded-lg p-2 text-gray-300 hover:bg-surface-hover md:hidden" aria-label="Abrir menu" onClick={() => setMenuAberto(aberto => !aberto)}>{menuAberto ? <X size={20} /> : <Menu size={20} />}</button><div><p className="text-xs text-gray-500">ADM PRO WEB</p><h1 className="text-lg font-semibold">{pagina === 'supervisor' ? 'Painel do Supervisor' : pagina === 'inicio' ? 'Painel Inicial' : pagina === 'rh' ? 'Colaboradores' : pagina === 'estoque' ? 'Estoque' : 'Lançamentos'}</h1></div></div><p className="hidden text-sm text-gray-400 sm:block">{perfil.email}</p></header><main className="flex-1 overflow-y-auto p-4 md:p-6">
       {erro && <p className="mt-6 rounded-md bg-red-950/50 p-3 text-sm text-red-300">{erro}</p>}
       {perfil.perfil === 'master' && resumoMaster && <section className="mt-7"><h2 className="mb-4 text-lg font-semibold">Painel Administrador</h2><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Obras</p><p className="mt-2 text-3xl font-bold">{resumoMaster.obras}</p></div><div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Usuários ativos</p><p className="mt-2 text-3xl font-bold">{resumoMaster.usuarios}</p></div><div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Supervisores</p><p className="mt-2 text-3xl font-bold">{resumoMaster.supervisores}</p></div><div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Administradores</p><p className="mt-2 text-3xl font-bold">{resumoMaster.administradores}</p></div></div></section>}
+      {perfil.perfil === 'supervisor' && pagina === 'supervisor' && resumoSupervisor && <section className="mx-auto max-w-7xl py-2 md:py-4"><div className="mb-6"><p className="text-sm font-semibold text-brand-400">VISÃO GERAL</p><h2 className="mt-1 text-2xl font-bold">Suas obras</h2><p className="mt-1 text-sm text-gray-400">Acompanhamento consolidado das obras sob sua gestão.</p></div><div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4"><div className="rounded-2xl border border-emerald-500/35 bg-surface p-5"><div className="flex items-center gap-2 text-emerald-300"><Building2 size={16} /><p className="text-xs font-bold uppercase tracking-wide">Sua gestão</p></div><p className="mt-5 text-3xl font-bold">{resumoSupervisor.obras.length}</p><p className="mt-1 text-sm text-gray-400">obras · {resumoSupervisor.colaboradores} colaboradores</p></div><div className="rounded-2xl border border-brand-500/35 bg-surface p-5"><div className="flex items-center gap-2 text-brand-300"><ArrowLeftRight size={16} /><p className="text-xs font-bold uppercase tracking-wide">Movimentação do mês</p></div><p className="mt-5 text-2xl font-bold text-brand-300">{resumoSupervisor.admissoes} / {resumoSupervisor.desligamentos}</p><p className="mt-1 text-sm text-gray-400">admissões / desligamentos</p></div><div className="rounded-2xl border border-amber-500/35 bg-surface p-5"><div className="flex items-center gap-2 text-amber-300"><Wallet size={16} /><p className="text-xs font-bold uppercase tracking-wide">Despesas no mês</p></div><p className="mt-5 text-2xl font-bold text-amber-300">{resumoSupervisor.despesas.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p><p className="mt-1 text-sm text-gray-400">lançamentos não cancelados</p></div><div className="rounded-2xl border border-purple-500/35 bg-surface p-5"><div className="flex items-center gap-2 text-purple-300"><UsersRound size={16} /><p className="text-xs font-bold uppercase tracking-wide">Equipe ativa</p></div><p className="mt-5 text-3xl font-bold text-purple-300">{resumoSupervisor.colaboradores}</p><p className="mt-1 text-sm text-gray-400">idade média: {resumoSupervisor.idadeMedia ? `${resumoSupervisor.idadeMedia} anos` : '—'}</p></div></div><div className="mt-6 grid gap-5 2xl:grid-cols-3"><section className="rounded-2xl border border-surface-border bg-surface p-5 2xl:col-span-2"><div className="flex items-center justify-between gap-3"><div><h3 className="font-semibold">Obras acompanhadas</h3><p className="mt-1 text-sm text-gray-400">Organizadas por estado, como no painel desktop.</p></div><span className="rounded-lg bg-surface-hover px-3 py-1.5 text-sm text-gray-300">{resumoSupervisor.obras.length} obra(s)</span></div><div className="mt-4 divide-y divide-surface-border">{resumoSupervisor.obras.length === 0 ? <p className="py-6 text-sm text-gray-400">Nenhuma obra vinculada a este supervisor.</p> : resumoSupervisor.obras.map(obra => <div key={obra.id} className="flex items-center justify-between gap-4 py-4"><div className="flex min-w-0 items-center gap-3"><span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-500/10 text-brand-300"><MapPin size={16} /></span><div className="min-w-0"><p className="truncate font-medium">{obra.titulo_obra || obra.nome}</p><p className="truncate text-xs text-gray-400">{obra.nome}{obra.estado ? ` · ${obra.estado}` : ''}</p></div></div><span className="shrink-0 rounded-full bg-surface-hover px-2.5 py-1 text-xs text-gray-300">{obra.estado || 'Sem estado'}</span></div>)}</div></section><section className="rounded-2xl border border-surface-border bg-surface p-5"><h3 className="font-semibold">Pendências para aprovação</h3><p className="mt-2 text-sm text-gray-400">Itens de lote aguardando decisão do supervisor.</p><p className="mt-7 text-5xl font-bold text-amber-300">{resumoSupervisor.pendencias}</p><p className="mt-2 text-sm text-gray-400">autorizações e notas fiscais</p></section></div></section>}
       {resumo && pagina === 'inicio' && <section className="mt-8">
         <h2 className="mb-4 text-lg font-semibold">Painel inicial</h2>
         <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
