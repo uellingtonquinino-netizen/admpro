@@ -17,6 +17,9 @@ type ResumoObra = {
   ativos: number
   custoFolha: number
   lancamentos: { id: number; descricao: string; valor: number; tipo: string; data: string; status: string }[]
+  mediaIdade: number | null
+  aniversariantes: { nome: string; funcao: string | null; nascimento: string }[]
+  porFuncao: { funcao: string; quantidade: number; custo: number }[]
 }
 
 type Lancamento = { id: number; descricao: string; valor: number; tipo: string; data: string; data_venc: string | null; status: string }
@@ -66,16 +69,27 @@ function PortalWeb() {
     else {
       setPerfil(data)
       const [colaboradores, lancamentos] = await Promise.all([
-        supabase.from('colaboradores').select('salario_base').eq('empresa_id', data.empresa_id).eq('status', 'ativo'),
+        supabase.from('colaboradores').select('nome,funcao,nascimento,salario_base').eq('empresa_id', data.empresa_id).eq('status', 'ativo'),
         supabase.from('lancamentos').select('id,descricao,valor,tipo,data,status').eq('empresa_id', data.empresa_id).order('created_at', { ascending: false }).limit(5),
       ])
       if (colaboradores.error || lancamentos.error) {
         setErro('Não foi possível carregar o resumo da obra.')
       } else {
+        const hoje = new Date()
+        const idades = (colaboradores.data ?? []).filter(item => item.nascimento).map(item => (hoje.getTime() - new Date(`${item.nascimento}T00:00:00`).getTime()) / 31557600000)
+        const porFuncao = new Map<string, { quantidade: number; custo: number }>()
+        for (const item of colaboradores.data ?? []) {
+          if (!item.funcao) continue
+          const atual = porFuncao.get(item.funcao) ?? { quantidade: 0, custo: 0 }
+          atual.quantidade += 1; atual.custo += Number(item.salario_base); porFuncao.set(item.funcao, atual)
+        }
         setResumo({
           ativos: colaboradores.data?.length ?? 0,
           custoFolha: (colaboradores.data ?? []).reduce((total, item) => total + Number(item.salario_base), 0),
           lancamentos: lancamentos.data ?? [],
+          mediaIdade: idades.length ? Math.round(idades.reduce((total, idade) => total + idade, 0) / idades.length) : null,
+          aniversariantes: (colaboradores.data ?? []).filter(item => item.nascimento?.slice(5, 7) === String(hoje.getMonth() + 1).padStart(2, '0')).map(item => ({ nome: item.nome, funcao: item.funcao, nascimento: item.nascimento! })).sort((a, b) => a.nascimento.localeCompare(b.nascimento)),
+          porFuncao: [...porFuncao].map(([funcao, dados]) => ({ funcao, ...dados })).sort((a, b) => b.quantidade - a.quantidade),
         })
         const { data: listaFinanceira, error: erroFinanceiro } = await supabase
           .from('lancamentos')
@@ -206,10 +220,13 @@ function PortalWeb() {
       {erro && <p className="mt-6 rounded-md bg-red-950/50 p-3 text-sm text-red-300">{erro}</p>}
       {resumo && pagina === 'inicio' && <section className="mt-8">
         <h2 className="mb-4 text-lg font-semibold">Painel inicial</h2>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Colaboradores ativos</p><p className="mt-2 text-3xl font-bold">{resumo.ativos}</p></div>
           <div className="rounded-lg border border-surface-border bg-surface p-5"><p className="text-sm text-gray-400">Custo de folha</p><p className="mt-2 text-3xl font-bold">{resumo.custoFolha.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-5"><p className="text-sm text-amber-100">Média de idade</p><p className="mt-2 text-3xl font-bold text-amber-300">{resumo.mediaIdade ? `${resumo.mediaIdade} anos` : '—'}</p></div>
+          <div className="rounded-lg border border-purple-500/30 bg-purple-500/10 p-5"><p className="text-sm text-purple-100">Aniversariantes do mês</p><p className="mt-2 text-3xl font-bold text-purple-300">{resumo.aniversariantes.length}</p></div>
         </div>
+        <div className="mt-5 grid gap-5 xl:grid-cols-3"><div className="rounded-lg border border-surface-border bg-surface p-5 xl:col-span-2"><h3 className="font-medium">Colaboradores por função</h3><div className="mt-4 space-y-4">{resumo.porFuncao.length === 0 ? <p className="text-sm text-gray-400">Sem funções cadastradas.</p> : resumo.porFuncao.map(item => <div key={item.funcao}><div className="flex justify-between gap-4 text-sm"><strong>{item.funcao}</strong><span className="text-gray-400">{item.quantidade} · {item.custo.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-hover"><div className="h-full rounded-full bg-brand-500" style={{ width: `${Math.max(6, (item.quantidade / resumo.ativos) * 100)}%` }} /></div></div>)}</div></div><div className="rounded-lg border border-surface-border bg-surface p-5"><h3 className="font-medium">Aniversariantes do mês</h3><div className="mt-3 space-y-3">{resumo.aniversariantes.length === 0 ? <p className="text-sm text-gray-400">Nenhum aniversariante neste mês.</p> : resumo.aniversariantes.map(item => <div key={`${item.nome}-${item.nascimento}`} className="flex gap-3"><span className="grid h-8 w-8 place-items-center rounded-lg bg-purple-500/15 text-xs text-purple-300">{item.nascimento.slice(8, 10)}</span><div className="min-w-0"><p className="truncate text-sm font-medium">{item.nome}</p><p className="truncate text-xs text-gray-400">{item.funcao ?? '—'}</p></div></div>)}</div></div></div>
         <div className="mt-5 rounded-lg border border-surface-border bg-surface p-5">
           <h3 className="font-medium">Últimos lançamentos</h3>
           <div className="mt-3 divide-y divide-surface-border">
