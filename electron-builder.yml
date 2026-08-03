@@ -1,0 +1,31 @@
+appId: com.otimizzai.app
+productName: Otimizzai
+copyright: Copyright © 2026 Otimizzai
+
+directories:
+  output: dist-electron
+  buildResources: build
+
+files:
+  - dist/**/*
+  - dist-main/**/*
+  - dist-preload/**/*
+  - package.json
+
+extraResources:
+  - from: resources
+    to: resources
+
+win:
+  icon: build/icons/icon.ico
+  target:
+    - target: nsis
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  installerIcon: build/icons/icon.ico
+  uninstallerIcon: build/icons/icon.ico
+  createDesktopShortcut: always
+  createStartMenuShortcut: true

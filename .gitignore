@@ -1,0 +1,13 @@
+.env
+.env.local
+.env.*
+!.env.web.example
+node_modules/
+dist/
+dist-web/
+dist-main/
+dist-preload/
+release/
+supabase/.temp/
+supabase/imports/
+dist-electron/

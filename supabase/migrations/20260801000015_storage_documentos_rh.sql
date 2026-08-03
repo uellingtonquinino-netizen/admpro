@@ -1,0 +1,6 @@
+grant select, insert, delete on public.colaboradores_anexos to authenticated;
+create policy "anexos_colaborador_ler_obra" on public.colaboradores_anexos for select to authenticated using (exists (select 1 from public.colaboradores c where c.id=colaborador_id and public.pode_acessar_empresa(c.empresa_id)));
+create policy "anexos_colaborador_gravar_obra" on public.colaboradores_anexos for all to authenticated using (exists (select 1 from public.colaboradores c where c.id=colaborador_id and public.pode_editar_financeiro(c.empresa_id))) with check (exists (select 1 from public.colaboradores c where c.id=colaborador_id and public.pode_editar_financeiro(c.empresa_id)));
+create policy "documentos_rh_ler_obra" on storage.objects for select to authenticated using (bucket_id='documentos-rh' and public.pode_acessar_empresa(split_part(name,'/',1)::bigint));
+create policy "documentos_rh_gravar_obra" on storage.objects for insert to authenticated with check (bucket_id='documentos-rh' and public.pode_editar_financeiro(split_part(name,'/',1)::bigint));
+create policy "documentos_rh_excluir_obra" on storage.objects for delete to authenticated using (bucket_id='documentos-rh' and public.pode_editar_financeiro(split_part(name,'/',1)::bigint));

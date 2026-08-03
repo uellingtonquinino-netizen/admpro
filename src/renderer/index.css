@@ -1,0 +1,90 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    /* Aumenta a fonte em todo o app de uma vez (a maioria das classes
+       do Tailwind usa rem, que escala junto com o tamanho da raiz) —
+       inclui o menu lateral e o restante da interface, mantendo as
+       mesmas proporções de antes. */
+    font-size: 17.5px;
+  }
+  * {
+    @apply border-surface-border;
+  }
+  /* CORRIGIDO: o contorno de foco padrão do navegador nunca tinha sido
+     desativado — em alguns elementos ele aparecia como uma linha azul
+     "solta", cruzando o topo da janela até a lateral do menu. Os
+     elementos interativos já têm seu próprio destaque visual (fundo
+     ao passar o mouse/selecionar, borda ao focar campos de texto),
+     então o contorno padrão do navegador fica desligado. */
+  *:focus {
+    outline: none;
+  }
+  body {
+    @apply bg-surface-card text-gray-100 font-sans antialiased;
+    -webkit-app-region: no-drag;
+  }
+  ::-webkit-scrollbar       { @apply w-1.5 h-1.5; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-surface-hover rounded-full; }
+}
+
+@layer components {
+  .card {
+    @apply bg-surface rounded-xl p-4 shadow-card
+           border border-surface-border;
+  }
+  .btn {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg
+           text-sm font-medium transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand-600 hover:bg-brand-500
+           text-white shadow-glow-sm hover:shadow-glow;
+  }
+  .btn-ghost {
+    @apply btn hover:bg-surface-hover text-gray-400
+           hover:text-gray-100;
+  }
+  .btn-danger {
+    @apply btn bg-red-600/20 hover:bg-red-600/40
+           text-red-400 hover:text-red-300;
+  }
+  .input {
+    @apply w-full bg-surface-card border border-surface-border
+           rounded-lg px-3 py-2 text-sm text-gray-100
+           placeholder-gray-500 outline-none
+           focus:border-brand-500 focus:ring-1
+           focus:ring-brand-500/30 transition-all duration-200;
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full
+           text-xs font-medium;
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full
+           text-xs font-medium;
+  }
+  .badge-green  { @apply badge bg-emerald-500/20 text-emerald-400; }
+  .badge-red    { @apply badge bg-red-500/20 text-red-400; }
+  .badge-yellow { @apply badge bg-yellow-500/20 text-yellow-400; }
+  .badge-blue   { @apply badge bg-blue-500/20 text-blue-400; }
+  .badge-gray   { @apply badge bg-gray-500/20 text-gray-400; }
+
+  .shimmer {
+    @apply bg-gradient-to-r from-surface via-surface-hover to-surface
+           bg-[length:200%_100%] animate-shimmer;
+  }
+
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
