@@ -3134,6 +3134,7 @@ function PortalWeb() {
                                         ).toLocaleDateString("pt-BR")
                                       : ""}
                                   </span>
+                                  <span className={itensSupervisorPendentes.some(item => item.lote_id === lote.id) ? "ml-2 rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300" : "ml-2 rounded-full bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300"}>{itensSupervisorPendentes.some(item => item.lote_id === lote.id) ? "Pendente" : "Concluído"}</span>
                                 </button>
                               ))
                           )}
@@ -3278,18 +3279,6 @@ function PortalWeb() {
                         ))
                       )}
                     </div>
-                  </section>
-                  <section className="rounded-2xl border border-surface-border bg-surface p-5">
-                    <h3 className="font-semibold">Pendências para aprovação</h3>
-                    <p className="mt-2 text-sm text-gray-400">
-                      Itens de lote aguardando decisão do supervisor.
-                    </p>
-                    <p className="mt-7 text-5xl font-bold text-amber-300">
-                      {resumoSupervisor.pendencias}
-                    </p>
-                    <p className="mt-2 text-sm text-gray-400">
-                      autorizações e notas fiscais
-                    </p>
                   </section>
                 </div>
               </section>
