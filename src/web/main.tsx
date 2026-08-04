@@ -555,6 +555,10 @@ function PortalWeb() {
   const [filtroTipoFinanceiro, setFiltroTipoFinanceiro] = useState("todos");
   const [novoFornecedor, setNovoFornecedor] = useState(false);
   const [salvandoFornecedor, setSalvandoFornecedor] = useState(false);
+  const [excluindoFornecedorId, setExcluindoFornecedorId] = useState<
+    number | null
+  >(null);
+  const [buscaFornecedor, setBuscaFornecedor] = useState("");
   const [formFornecedor, setFormFornecedor] = useState({
     nome: "",
     tipo_pessoa: "pj",
@@ -1491,6 +1495,23 @@ function PortalWeb() {
     await carregarPerfil(session);
   }
 
+  async function excluirFornecedor(item: FornecedorWeb) {
+    if (!session) return;
+    if (!window.confirm(`Excluir o fornecedor “${item.nome}”?`)) return;
+    setErro("");
+    setExcluindoFornecedorId(item.id);
+    const { error } = await supabase
+      .from("fornecedores")
+      .delete()
+      .eq("id", item.id);
+    setExcluindoFornecedorId(null);
+    if (error) {
+      setErro(`Não foi possível excluir o fornecedor: ${error.message}`);
+      return;
+    }
+    await carregarPerfil(session);
+  }
+
   async function salvarAp(evento: FormEvent) {
     evento.preventDefault();
     if (!perfil) return;
@@ -2349,6 +2370,11 @@ function PortalWeb() {
   const produtosAbaixoMinimo = produtosWeb.filter(
     (item) => Number(item.estoque_atual) <= Number(item.estoque_minimo),
   ).length;
+  const fornecedoresFiltrados = fornecedoresWeb.filter((item) =>
+    `${item.nome} ${item.cnpj ?? ""} ${item.cpf ?? ""} ${item.email ?? ""} ${item.telefone ?? ""}`
+      .toLowerCase()
+      .includes(buscaFornecedor.toLowerCase()),
+  );
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-white">
@@ -6581,7 +6607,42 @@ function PortalWeb() {
                   </div>
                 </form>
               )}
-              <div className="overflow-x-auto rounded-xl border border-surface-border bg-surface">
+              <input
+                className="mb-4 w-full rounded-lg border border-surface-border bg-surface px-3 py-2.5 text-sm text-white sm:max-w-md"
+                placeholder="Buscar fornecedor…"
+                value={buscaFornecedor}
+                onChange={(e) => setBuscaFornecedor(e.target.value)}
+              />
+              <div className="space-y-3 md:hidden">
+                {fornecedoresFiltrados.length === 0 ? (
+                  <p className="rounded-xl border border-surface-border bg-surface p-5 text-sm text-gray-400">
+                    Nenhum fornecedor encontrado.
+                  </p>
+                ) : (
+                  fornecedoresFiltrados.map((item) => (
+                    <article key={item.id} className="rounded-xl border border-surface-border bg-surface p-4">
+                      <p className="truncate font-semibold">{item.nome}</p>
+                      <p className="mt-1 text-sm text-gray-400">
+                        {item.cnpj ?? item.cpf ?? "Sem documento"}
+                      </p>
+                      <p className="mt-1 truncate text-xs text-gray-500">
+                        {item.email ?? item.telefone ?? "Sem contato"}
+                      </p>
+                      <button
+                        type="button"
+                        className="mt-4 rounded-lg border border-red-500/40 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-60"
+                        disabled={excluindoFornecedorId === item.id}
+                        onClick={() => void excluirFornecedor(item)}
+                      >
+                        {excluindoFornecedorId === item.id
+                          ? "Excluindo…"
+                          : "Excluir fornecedor"}
+                      </button>
+                    </article>
+                  ))
+                )}
+              </div>
+              <div className="hidden overflow-x-auto rounded-xl border border-surface-border bg-surface md:block">
                 <table className="w-full min-w-[640px] text-left text-sm">
                   <thead className="bg-surface-card text-gray-400">
                     <tr>
@@ -6589,17 +6650,18 @@ function PortalWeb() {
                       <th className="p-3">Documento</th>
                       <th className="p-3">Contato</th>
                       <th className="p-3">Categoria</th>
+                      <th className="p-3"></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {fornecedoresWeb.length === 0 ? (
+                    {fornecedoresFiltrados.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="p-6 text-gray-400">
-                          Nenhum fornecedor cadastrado.
+                        <td colSpan={5} className="p-6 text-gray-400">
+                          Nenhum fornecedor encontrado.
                         </td>
                       </tr>
                     ) : (
-                      fornecedoresWeb.map((item) => (
+                      fornecedoresFiltrados.map((item) => (
                         <tr
                           key={item.id}
                           className="border-t border-surface-border"
@@ -6613,6 +6675,18 @@ function PortalWeb() {
                           </td>
                           <td className="p-3 text-gray-400">
                             {item.categoria ?? "—"}
+                          </td>
+                          <td className="p-3 text-right">
+                            <button
+                              type="button"
+                              className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-60"
+                              disabled={excluindoFornecedorId === item.id}
+                              onClick={() => void excluirFornecedor(item)}
+                            >
+                              {excluindoFornecedorId === item.id
+                                ? "Excluindo…"
+                                : "Excluir"}
+                            </button>
                           </td>
                         </tr>
                       ))
