@@ -639,6 +639,15 @@ function PortalWeb() {
   >(new Set());
   const [processandoLote, setProcessandoLote] = useState(false);
   const [buscaProduto, setBuscaProduto] = useState("");
+  const [novoProduto, setNovoProduto] = useState(false);
+  const [salvandoProduto, setSalvandoProduto] = useState(false);
+  const [formProduto, setFormProduto] = useState({
+    codigo: "",
+    nome: "",
+    unidade: "UN",
+    estoque_minimo: "0",
+    valor_unitario: "0",
+  });
   const [buscaGeral, setBuscaGeral] = useState("");
   const [periodoInicial, setPeriodoInicial] = useState("0001-01-01");
   const [periodoFinal, setPeriodoFinal] = useState(
@@ -1907,6 +1916,34 @@ function PortalWeb() {
       setErro(`Não foi possível excluir o colaborador: ${error.message}`);
       return;
     }
+    await carregarPerfil(session);
+  }
+
+  async function salvarProduto(evento: FormEvent) {
+    evento.preventDefault();
+    if (!perfil || !formProduto.codigo.trim() || !formProduto.nome.trim()) {
+      setErro("Informe o código e o nome do material.");
+      return;
+    }
+    setErro("");
+    setSalvandoProduto(true);
+    const { error } = await supabase.from("produtos").insert({
+      empresa_id: perfil.empresa_id,
+      codigo: formProduto.codigo.trim(),
+      nome: formProduto.nome.trim(),
+      unidade: formProduto.unidade.trim() || "UN",
+      estoque_atual: 0,
+      estoque_minimo: Number(formProduto.estoque_minimo || 0),
+      valor_unitario: Number(formProduto.valor_unitario || 0),
+      ativo: 1,
+    });
+    setSalvandoProduto(false);
+    if (error) {
+      setErro(`Não foi possível cadastrar o material: ${error.message}`);
+      return;
+    }
+    setNovoProduto(false);
+    setFormProduto({ codigo: "", nome: "", unidade: "UN", estoque_minimo: "0", valor_unitario: "0" });
     await carregarPerfil(session);
   }
 
@@ -5562,6 +5599,23 @@ function PortalWeb() {
                   </p>
                 </div>
               </div>
+              {perfil.perfil !== "gestor" && (
+                <div className="mb-4">
+                  <button type="button" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium" onClick={() => setNovoProduto((aberto) => !aberto)}>
+                    {novoProduto ? "Cancelar" : "+ Novo material"}
+                  </button>
+                  {novoProduto && (
+                    <form onSubmit={salvarProduto} className="mt-3 grid gap-3 rounded-xl border border-surface-border bg-surface p-4 sm:grid-cols-2">
+                      <input required className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Código" value={formProduto.codigo} onChange={(e) => setFormProduto({ ...formProduto, codigo: e.target.value })} />
+                      <input required className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Nome do material" value={formProduto.nome} onChange={(e) => setFormProduto({ ...formProduto, nome: e.target.value })} />
+                      <input className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Unidade" value={formProduto.unidade} onChange={(e) => setFormProduto({ ...formProduto, unidade: e.target.value })} />
+                      <input type="number" min="0" className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Estoque mínimo" value={formProduto.estoque_minimo} onChange={(e) => setFormProduto({ ...formProduto, estoque_minimo: e.target.value })} />
+                      <input type="number" min="0" step="0.01" className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Valor unitário" value={formProduto.valor_unitario} onChange={(e) => setFormProduto({ ...formProduto, valor_unitario: e.target.value })} />
+                      <button disabled={salvandoProduto} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60">{salvandoProduto ? "Salvando…" : "Cadastrar material"}</button>
+                    </form>
+                  )}
+                </div>
+              )}
               <input
                 className="mb-4 w-full rounded-lg border border-surface-border bg-surface px-3 py-2.5 text-sm text-white sm:max-w-md"
                 placeholder="Buscar código ou produto…"
