@@ -143,6 +143,13 @@ type AnexoFinanceiro = {
   categoria?: string;
   ordem: number;
 };
+type AnexoColaborador = {
+  id: number;
+  caminho: string;
+  nome: string;
+  descricao: string | null;
+  created_at: string;
+};
 type FornecedorWeb = {
   id: number;
   nome: string;
@@ -681,6 +688,19 @@ function PortalWeb() {
   const [excluindoColaboradorId, setExcluindoColaboradorId] = useState<
     number | null
   >(null);
+  const [colaboradorDocumentosId, setColaboradorDocumentosId] = useState<
+    number | null
+  >(null);
+  const [anexosColaborador, setAnexosColaborador] = useState<
+    AnexoColaborador[]
+  >([]);
+  const [novosAnexosColaborador, setNovosAnexosColaborador] = useState<
+    File[]
+  >([]);
+  const [carregandoAnexosColaborador, setCarregandoAnexosColaborador] =
+    useState(false);
+  const [enviandoAnexosColaborador, setEnviandoAnexosColaborador] =
+    useState(false);
   const [formColaborador, setFormColaborador] = useState({
     nome: "",
     funcao: "",
@@ -2197,6 +2217,86 @@ function PortalWeb() {
     } finally {
       setEnviandoAnexosFinanceiros(false);
     }
+  }
+
+  async function carregarAnexosColaborador(colaboradorId: number) {
+    setCarregandoAnexosColaborador(true);
+    const { data, error } = await supabase
+      .from("colaboradores_anexos")
+      .select("id,caminho,nome,descricao,created_at")
+      .eq("colaborador_id", colaboradorId)
+      .order("created_at", { ascending: false });
+    setCarregandoAnexosColaborador(false);
+    if (error) {
+      setErro(`Não foi possível carregar os documentos: ${error.message}`);
+      return;
+    }
+    setAnexosColaborador((data ?? []) as AnexoColaborador[]);
+  }
+
+  async function enviarAnexosColaborador(evento: FormEvent) {
+    evento.preventDefault();
+    if (!perfil || !colaboradorDocumentosId || novosAnexosColaborador.length === 0) {
+      setErro("Selecione ao menos um arquivo para enviar.");
+      return;
+    }
+    setErro("");
+    setEnviandoAnexosColaborador(true);
+    try {
+      for (const arquivo of novosAnexosColaborador) {
+        const nomeSeguro = arquivo.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const caminho = `${perfil.empresa_id}/colaboradores/${colaboradorDocumentosId}/${Date.now()}-${nomeSeguro}`;
+        const { error: erroUpload } = await supabase.storage
+          .from("documentos-rh")
+          .upload(caminho, arquivo);
+        if (erroUpload) throw erroUpload;
+        const { error: erroRegistro } = await supabase
+          .from("colaboradores_anexos")
+          .insert({
+            colaborador_id: colaboradorDocumentosId,
+            caminho: `supabase://documentos-rh/${caminho}`,
+            nome: arquivo.name,
+            descricao: null,
+          });
+        if (erroRegistro) throw erroRegistro;
+      }
+      setNovosAnexosColaborador([]);
+      await carregarAnexosColaborador(colaboradorDocumentosId);
+    } catch (causa) {
+      setErro(
+        `Não foi possível enviar os documentos: ${causa instanceof Error ? causa.message : "erro desconhecido"}`,
+      );
+    } finally {
+      setEnviandoAnexosColaborador(false);
+    }
+  }
+
+  async function removerAnexoColaborador(anexo: AnexoColaborador) {
+    if (!colaboradorDocumentosId || !window.confirm(`Remover “${anexo.nome}”?`))
+      return;
+    const caminho = caminhoStorage(anexo.caminho);
+    const { error: erroArquivo } = await supabase.storage
+      .from("documentos-rh")
+      .remove([caminho]);
+    if (erroArquivo) {
+      setErro(`Não foi possível remover o arquivo: ${erroArquivo.message}`);
+      return;
+    }
+    const { error } = await supabase
+      .from("colaboradores_anexos")
+      .delete()
+      .eq("id", anexo.id);
+    if (error) {
+      setErro(`Não foi possível remover o registro: ${error.message}`);
+      return;
+    }
+    await carregarAnexosColaborador(colaboradorDocumentosId);
+  }
+
+  function abrirDocumentosColaborador(colaboradorId: number) {
+    setColaboradorDocumentosId(colaboradorId);
+    setNovosAnexosColaborador([]);
+    void carregarAnexosColaborador(colaboradorId);
   }
 
   async function obterUrlArquivo(caminho: string) {
@@ -4960,6 +5060,13 @@ function PortalWeb() {
                                 <div className="flex justify-end gap-2">
                                   <button
                                     type="button"
+                                    className="text-xs text-gray-300"
+                                    onClick={() => abrirDocumentosColaborador(item.id)}
+                                  >
+                                    Documentos
+                                  </button>
+                                  <button
+                                    type="button"
                                     className="rounded-lg border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
                                     onClick={() => editarLancamento(item)}
                                   >
@@ -5170,6 +5277,43 @@ function PortalWeb() {
                     </div>
                   </form>
                 )}
+                {colaboradorDocumentosId && (
+                  <section className="mb-5 rounded-xl border border-brand-500/35 bg-surface p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold">Documentos do colaborador</h3>
+                        <p className="mt-1 text-sm text-gray-400">
+                          Anexe arquivos e use os botões para abrir, baixar ou imprimir.
+                        </p>
+                      </div>
+                      <button type="button" className="text-xs text-gray-400 hover:text-white" onClick={() => { setColaboradorDocumentosId(null); setAnexosColaborador([]); }}>
+                        Fechar
+                      </button>
+                    </div>
+                    <form className="mt-4 flex flex-wrap items-end gap-3" onSubmit={enviarAnexosColaborador}>
+                      <label className="min-w-60 flex-1 text-sm text-gray-300">
+                        Selecionar arquivos
+                        <input className="mt-1 block w-full text-sm" type="file" multiple onChange={(e) => setNovosAnexosColaborador(Array.from(e.target.files ?? []))} />
+                      </label>
+                      <button className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60" disabled={enviandoAnexosColaborador || novosAnexosColaborador.length === 0}>
+                        {enviandoAnexosColaborador ? "Enviando…" : "Anexar arquivos"}
+                      </button>
+                    </form>
+                    <div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">
+                      {carregandoAnexosColaborador ? <p className="p-4 text-sm text-gray-400">Carregando documentos…</p> : anexosColaborador.length === 0 ? <p className="p-4 text-sm text-gray-400">Nenhum documento anexado.</p> : anexosColaborador.map((anexo) => (
+                        <div key={anexo.id} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="min-w-0 truncate text-sm">{anexo.nome}</p>
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" className="rounded-md border border-surface-border px-3 py-1.5 text-xs" onClick={() => void visualizarArquivo(anexo.caminho)}>Abrir</button>
+                            <button type="button" className="rounded-md border border-surface-border px-3 py-1.5 text-xs" onClick={() => void baixarArquivo(anexo.caminho)}>Baixar</button>
+                            <button type="button" className="rounded-md border border-surface-border px-3 py-1.5 text-xs" onClick={() => void imprimirArquivo(anexo.caminho)}>Imprimir</button>
+                            <button type="button" className="rounded-md border border-red-500/30 px-3 py-1.5 text-xs text-red-300" onClick={() => void removerAnexoColaborador(anexo)}>Remover</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
                 <div className="space-y-3 md:hidden">
                   {colaboradoresFiltrados.length === 0 ? (
                     <p className="rounded-xl border border-surface-border bg-surface p-5 text-sm text-gray-400">
@@ -5221,6 +5365,13 @@ function PortalWeb() {
                         </div>
                         {perfil.perfil === "admin" && (
                           <div className="mt-4 flex gap-2 border-t border-surface-border pt-3">
+                            <button
+                              type="button"
+                              className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200"
+                              onClick={() => abrirDocumentosColaborador(item.id)}
+                            >
+                              Documentos
+                            </button>
                             <button
                               type="button"
                               className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-brand-300"
