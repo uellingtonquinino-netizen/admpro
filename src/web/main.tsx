@@ -734,9 +734,6 @@ function PortalWeb() {
           setCarregando(false);
           return;
         }
-        const inicioMes = new Date();
-        inicioMes.setDate(1);
-        const inicioMesTexto = inicioMes.toISOString().slice(0, 10);
         const [
           { data: obras, error: erroObras },
           { data: colaboradores, error: erroColaboradores },
@@ -757,7 +754,9 @@ function PortalWeb() {
           supabase
             .from("lancamentos")
             .select("valor,tipo,status,data")
-            .in("empresa_id", empresaIds),
+            .in("empresa_id", empresaIds)
+            .gte("data", periodoInicial)
+            .lte("data", periodoFinal),
           supabase
             .from("autorizacoes_pagamento")
             .select(
@@ -792,6 +791,14 @@ function PortalWeb() {
           const ativos = (colaboradores ?? []).filter(
             (item) => item.status === "ativo",
           );
+          const dentroDoPeriodo = (data?: string | null) => {
+            const dataTexto = data?.slice(0, 10);
+            return Boolean(
+              dataTexto &&
+                dataTexto >= periodoInicial &&
+                dataTexto <= periodoFinal,
+            );
+          };
           const idades = ativos
             .filter((item) => item.nascimento)
             .map(
@@ -801,7 +808,7 @@ function PortalWeb() {
                 31557600000,
             );
           const meses = Array.from({ length: 6 }, (_, indice) => {
-            const dataMes = new Date();
+            const dataMes = new Date(`${periodoFinal}T12:00:00`);
             dataMes.setMonth(dataMes.getMonth() - (5 - indice), 1);
             const chave = dataMes.toISOString().slice(0, 7);
             return {
@@ -845,20 +852,17 @@ function PortalWeb() {
                     idades.length,
                 )
               : null,
-            admissoes: (colaboradores ?? []).filter(
-              (item) =>
-                item.data_admissao?.slice(0, 7) === inicioMesTexto.slice(0, 7),
+            admissoes: (colaboradores ?? []).filter((item) =>
+              dentroDoPeriodo(item.data_admissao),
             ).length,
-            desligamentos: (colaboradores ?? []).filter(
-              (item) =>
-                item.data_demissao?.slice(0, 7) === inicioMesTexto.slice(0, 7),
+            desligamentos: (colaboradores ?? []).filter((item) =>
+              dentroDoPeriodo(item.data_demissao),
             ).length,
             despesas: (lancamentos ?? [])
               .filter(
                 (item) =>
                   item.tipo === "despesa" &&
-                  item.status !== "cancelado" &&
-                  item.data >= inicioMesTexto,
+                  item.status !== "cancelado" && dentroDoPeriodo(item.data),
               )
               .reduce((total, item) => total + Number(item.valor), 0),
             pendencias:
@@ -2025,6 +2029,19 @@ function PortalWeb() {
     janela.print();
   }
 
+  function imprimirRelatorioGestor() {
+    const janela = window.open("", "_blank", "noopener");
+    if (!janela) {
+      setErro("Permita pop-ups para imprimir o relatório.");
+      return;
+    }
+    const valor = (numero: number) => numero.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    janela.document.write(`<html><head><title>Relatório da obra</title><style>body{font-family:Arial;padding:32px;color:#172033}.numbers{display:flex;gap:16px;margin:20px 0}.number{padding:14px;border:1px solid #cbd5e1;border-radius:8px;min-width:150px}</style></head><body><h1>Relatório da obra</h1><p>${perfil?.nome ?? ""} · Emitido em ${new Date().toLocaleDateString("pt-BR")}</p><div class="numbers"><div class="number"><strong>Colaboradores ativos</strong><br/>${resumo?.ativos ?? 0}</div><div class="number"><strong>Despesas</strong><br/>${valor(resumoFinanceiro.despesas)}</div><div class="number"><strong>Receitas</strong><br/>${valor(resumoFinanceiro.receitas)}</div></div><h2>Autorizações de pagamento</h2><p>${autorizacoesWeb.length} registro(s), ${autorizacoesWeb.filter((item) => item.aprovado_por).length} autorizado(s).</p><h2>Notas fiscais</h2><p>${notasFiscaisWeb.length} registro(s), ${notasFiscaisWeb.filter((item) => item.aprovado_por).length} autorizado(s).</p></body></html>`);
+    janela.document.close();
+    janela.focus();
+    janela.print();
+  }
+
   async function assinarPdfNoStorage(caminho: string) {
     if (!perfil || !carimboUrl) {
       setErro("Cadastre sua assinatura antes de assinar o PDF.");
@@ -2329,6 +2346,19 @@ function PortalWeb() {
             </button>
           )}
           {perfil.perfil === "supervisor" && (
+            <button
+              className={
+                pagina === "supervisor_configuracoes"
+                  ? "flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm"
+                  : "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover"
+              }
+              onClick={() => navegar("supervisor_configuracoes")}
+            >
+              <ClipboardList size={16} />
+              Configurações
+            </button>
+          )}
+          {perfil.perfil === "gestor" && (
             <button
               className={
                 pagina === "supervisor_configuracoes"
@@ -3191,6 +3221,110 @@ function PortalWeb() {
                           ))
                         )}
                       </div>
+                      {documentoFinanceiroId && (
+                        <section className="mt-4 rounded-xl border border-brand-500/35 bg-surface p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h3 className="font-semibold">
+                                Arquivos do documento selecionado
+                              </h3>
+                              <p className="mt-1 text-sm text-gray-400">
+                                Visualize, baixe, imprima ou assine os PDFs antes
+                                de autorizar o item.
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              className="text-xs text-gray-400 hover:text-white"
+                              onClick={() => {
+                                setDocumentoFinanceiroId("");
+                                setAnexosFinanceiros([]);
+                              }}
+                            >
+                              Fechar
+                            </button>
+                          </div>
+                          <div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">
+                            {carregandoAnexosFinanceiros ? (
+                              <p className="p-4 text-sm text-gray-400">
+                                Carregando anexos…
+                              </p>
+                            ) : anexosFinanceiros.length === 0 ? (
+                              <p className="p-4 text-sm text-gray-400">
+                                Nenhum arquivo anexado a este documento.
+                              </p>
+                            ) : (
+                              anexosFinanceiros.map((anexo, indice) => {
+                                const nomeArquivo =
+                                  caminhoStorage(anexo.caminho)
+                                    .split("/")
+                                    .at(-1) ?? `Documento ${indice + 1}`;
+                                const ehPdf = caminhoStorage(anexo.caminho)
+                                  .toLowerCase()
+                                  .endsWith(".pdf");
+                                return (
+                                  <div
+                                    key={anexo.id}
+                                    className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+                                  >
+                                    <p className="min-w-0 truncate text-sm">
+                                      {nomeArquivo}
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                      <button
+                                        className="rounded-md border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                                        onClick={() =>
+                                          void visualizarArquivo(anexo.caminho)
+                                        }
+                                      >
+                                        Abrir
+                                      </button>
+                                      <button
+                                        className="rounded-md border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                                        onClick={() =>
+                                          void baixarArquivo(anexo.caminho)
+                                        }
+                                      >
+                                        Baixar
+                                      </button>
+                                      <button
+                                        className="rounded-md border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                                        onClick={() =>
+                                          void imprimirArquivo(anexo.caminho)
+                                        }
+                                      >
+                                        Imprimir
+                                      </button>
+                                      {ehPdf && (
+                                        <button
+                                          className="rounded-md bg-brand-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                                          disabled={!carimboUrl}
+                                          onClick={() =>
+                                            void assinarPdfNoStorage(anexo.caminho)
+                                          }
+                                        >
+                                          {carimboUrl
+                                            ? "Assinar PDF"
+                                            : "Cadastre a assinatura"}
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                          {!carimboUrl && anexosFinanceiros.length > 0 && (
+                            <button
+                              type="button"
+                              className="mt-3 text-sm font-medium text-brand-300 hover:text-brand-200"
+                              onClick={() => navegar("supervisor_configuracoes")}
+                            >
+                              Abrir configurações de assinatura
+                            </button>
+                          )}
+                        </section>
+                      )}
                     </>
                   );
                 })()}
@@ -3476,6 +3610,13 @@ function PortalWeb() {
                       onChange={(e) => setPeriodoFinal(e.target.value)}
                       className="rounded-lg border border-surface-border bg-surface-card px-2 py-1.5"
                     />
+                    <button
+                      type="button"
+                      className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-500"
+                      onClick={() => session && void carregarPerfil(session)}
+                    >
+                      Atualizar
+                    </button>
                   </div>
                   <p className="mt-1 text-sm text-gray-400">
                     Acompanhamento consolidado das obras sob sua gestão.
@@ -3864,6 +4005,15 @@ function PortalWeb() {
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      {perfil.perfil === "gestor" && (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-2 rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm"
+                          onClick={imprimirRelatorioGestor}
+                        >
+                          Imprimir relatório
+                        </button>
+                      )}
                       <button className="inline-flex items-center gap-2 rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm">
                         <CalendarDays size={14} />
                         {new Date().toLocaleDateString("pt-BR", {
@@ -3876,7 +4026,11 @@ function PortalWeb() {
                         {new Date().getFullYear()}
                         <ChevronDown size={14} />
                       </button>
-                      <button className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-2 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium"
+                        onClick={() => session && void carregarPerfil(session)}
+                      >
                         <RefreshCw size={14} />
                         Atualizar
                       </button>
@@ -5272,25 +5426,37 @@ function PortalWeb() {
                             })}
                           </td>
                           <td className="p-3 text-right">
-                            {item.aprovado_por ? (
-                              <span className="text-xs text-emerald-300">
-                                Autorizada
-                              </span>
-                            ) : (
+                            <div className="flex justify-end gap-2">
                               <button
-                                className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60"
-                                disabled={
-                                  itemFinanceiroProcessando === `ap-${item.id}`
-                                }
-                                onClick={() =>
-                                  void aprovarItemFinanceiro("ap", item.id)
-                                }
+                                className="rounded-lg border border-surface-border px-3 py-2 text-xs hover:bg-surface-hover"
+                                onClick={() => {
+                                  setDocumentoFinanceiroTipo("ap");
+                                  setDocumentoFinanceiroId(String(item.id));
+                                  void carregarAnexosFinanceiros("ap", String(item.id));
+                                }}
                               >
-                                {itemFinanceiroProcessando === `ap-${item.id}`
-                                  ? "Autorizando…"
-                                  : "Autorizar"}
+                                Documentos
                               </button>
-                            )}
+                              {item.aprovado_por ? (
+                                <span className="self-center text-xs text-emerald-300">
+                                  Autorizada
+                                </span>
+                              ) : (
+                                <button
+                                  className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60"
+                                  disabled={
+                                    itemFinanceiroProcessando === `ap-${item.id}`
+                                  }
+                                  onClick={() =>
+                                    void aprovarItemFinanceiro("ap", item.id)
+                                  }
+                                >
+                                  {itemFinanceiroProcessando === `ap-${item.id}`
+                                    ? "Autorizando…"
+                                    : "Autorizar"}
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -5349,25 +5515,37 @@ function PortalWeb() {
                             })}
                           </td>
                           <td className="p-3 text-right">
-                            {item.aprovado_por ? (
-                              <span className="text-xs text-emerald-300">
-                                Autorizada
-                              </span>
-                            ) : (
+                            <div className="flex justify-end gap-2">
                               <button
-                                className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60"
-                                disabled={
-                                  itemFinanceiroProcessando === `nf-${item.id}`
-                                }
-                                onClick={() =>
-                                  void aprovarItemFinanceiro("nf", item.id)
-                                }
+                                className="rounded-lg border border-surface-border px-3 py-2 text-xs hover:bg-surface-hover"
+                                onClick={() => {
+                                  setDocumentoFinanceiroTipo("nf");
+                                  setDocumentoFinanceiroId(String(item.id));
+                                  void carregarAnexosFinanceiros("nf", String(item.id));
+                                }}
                               >
-                                {itemFinanceiroProcessando === `nf-${item.id}`
-                                  ? "Autorizando…"
-                                  : "Autorizar"}
+                                Documentos
                               </button>
-                            )}
+                              {item.aprovado_por ? (
+                                <span className="self-center text-xs text-emerald-300">
+                                  Autorizada
+                                </span>
+                              ) : (
+                                <button
+                                  className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60"
+                                  disabled={
+                                    itemFinanceiroProcessando === `nf-${item.id}`
+                                  }
+                                  onClick={() =>
+                                    void aprovarItemFinanceiro("nf", item.id)
+                                  }
+                                >
+                                  {itemFinanceiroProcessando === `nf-${item.id}`
+                                    ? "Autorizando…"
+                                    : "Autorizar"}
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -5783,7 +5961,7 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {perfil.perfil === "supervisor" &&
+          {["supervisor", "gestor"].includes(perfil.perfil) &&
             pagina === "supervisor_configuracoes" && (
               <section className="mx-auto max-w-7xl pb-7">
                 <div className="rounded-xl border border-surface-border bg-surface p-4">
@@ -6361,12 +6539,12 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {perfil.perfil === "supervisor" &&
+          {["supervisor", "gestor"].includes(perfil.perfil) &&
             pagina === "supervisor_configuracoes" && (
               <section className="mx-auto max-w-7xl pb-7">
                 <div className="rounded-xl border border-surface-border bg-surface p-4">
                   <div>
-                    <h3 className="font-semibold">Assinatura do Supervisor</h3>
+                    <h3 className="font-semibold">Assinatura (carimbo)</h3>
                     <p className="mt-1 text-sm text-gray-400">
                       Esta assinatura identifica suas aprovações; a data, hora e
                       usuário ficam registrados no Supabase.
@@ -6535,8 +6713,8 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {perfil.perfil === "supervisor" &&
-            pagina === "supervisor" &&
+          {["supervisor", "gestor"].includes(perfil.perfil) &&
+            ["supervisor", "ap", "notas"].includes(pagina) &&
             documentoFinanceiroId &&
             anexosFinanceiros.length > 0 && (
               <section className="mx-auto max-w-7xl pb-7">
