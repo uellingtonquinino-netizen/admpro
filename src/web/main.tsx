@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import ReactDOM from 'react-dom/client'
 import { Session } from '@supabase/supabase-js'
+import { PDFDocument, rgb } from 'pdf-lib'
 import { ArrowLeftRight, Bell, Boxes, Building2, CalendarDays, ChevronDown, ClipboardList, LayoutDashboard, LogOut, MapPin, Menu, PackageMinus, PackagePlus, RefreshCw, Search, UsersRound, Wallet, X } from 'lucide-react'
 import { supabase } from './supabase'
 import '../renderer/index.css'
@@ -712,6 +713,40 @@ function PortalWeb() {
     } catch (causa) { setErro(`Não foi possível imprimir o arquivo: ${causa instanceof Error ? causa.message : 'erro desconhecido'}`) }
   }
 
+  async function assinarPdfNoStorage(caminho: string) {
+    if (!perfil || !carimboUrl) { setErro('Cadastre sua assinatura antes de assinar o PDF.'); return }
+    if (!documentoFinanceiroId) { setErro('Selecione a AP ou a Nota Fiscal para assinar.'); return }
+    try {
+      const resposta = await fetch(await obterUrlArquivo(caminho))
+      if (!resposta.ok) throw new Error('Não foi possível abrir o PDF original.')
+      const pdf = await PDFDocument.load(await resposta.arrayBuffer())
+      const dadosAssinatura = await fetch(carimboUrl).then(r => r.arrayBuffer())
+      let imagem
+      try { imagem = await pdf.embedPng(dadosAssinatura) }
+      catch { imagem = await pdf.embedJpg(dadosAssinatura) }
+      const pagina = pdf.getPages()[0]
+      const { width } = pagina.getSize()
+      const escala = Math.min(150 / imagem.width, 70 / imagem.height, 1)
+      const assinaturaLargura = imagem.width * escala
+      const assinaturaAltura = imagem.height * escala
+      const x = Math.max(24, width - assinaturaLargura - 36)
+      pagina.drawRectangle({ x: x - 8, y: 20, width: assinaturaLargura + 16, height: assinaturaAltura + 32, color: rgb(1, 1, 1), opacity: 0.92, borderColor: rgb(0.15, 0.35, 0.7), borderWidth: 0.7 })
+      pagina.drawImage(imagem, { x, y: 44, width: assinaturaLargura, height: assinaturaAltura })
+      pagina.drawText(`Aprovado por ${perfil.nome} em ${new Date().toLocaleString('pt-BR')}`, { x, y: 28, size: 7, color: rgb(0.08, 0.18, 0.36) })
+      const arquivoOriginal = caminhoStorage(caminho).split('/').at(-1)?.replace(/\.pdf$/i, '') ?? 'documento'
+      const destino = `${perfil.empresa_id}/financeiro/assinados/${documentoFinanceiroTipo}/${documentoFinanceiroId}/${Date.now()}-${arquivoOriginal}-assinado.pdf`
+      const bytesPdf = await pdf.save()
+      const bufferPdf = bytesPdf.buffer.slice(bytesPdf.byteOffset, bytesPdf.byteOffset + bytesPdf.byteLength) as ArrayBuffer
+      const { error: erroUpload } = await supabase.storage.from('documentos-rh').upload(destino, new Blob([bufferPdf], { type: 'application/pdf' }), { contentType: 'application/pdf', upsert: false })
+      if (erroUpload) throw erroUpload
+      const { error: erroRegistro } = await supabase.rpc('registrar_pdf_assinado_web', { p_tipo: documentoFinanceiroTipo, p_id: Number(documentoFinanceiroId), p_caminho: `supabase://documentos-rh/${destino}` })
+      if (erroRegistro) throw erroRegistro
+      await visualizarArquivo(`supabase://documentos-rh/${destino}`)
+    } catch (causa) {
+      setErro(`Não foi possível aplicar a assinatura: ${causa instanceof Error ? causa.message : 'erro desconhecido'}`)
+    }
+  }
+
   function selecionarCarimbo(arquivo: File | undefined) {
     if (!arquivo) return
     const leitor = new FileReader()
@@ -834,6 +869,7 @@ function PortalWeb() {
       {pagina === 'ap' && perfil.perfil === 'admin' && <section className="mx-auto max-w-[1180px] pb-7"><div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface p-4"><span className="text-sm text-gray-300">Editar autorização existente</span><select className="min-w-60 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" defaultValue="" onChange={e => { const item = autorizacoesWeb.find(ap => ap.id === Number(e.target.value)); if (!item) return; setEditandoApId(item.id); setFormAp({ fornecedor_id: String(item.beneficiario_id), descricao: item.descricao ?? '', valor: String(item.valor), vencimento: item.vencimento ?? new Date().toISOString().slice(0, 10), observacoes: '' }); setNovaAp(true) }}><option value="">Selecione uma AP</option>{autorizacoesWeb.filter(item => item.lote_id === null).map(item => <option key={item.id} value={item.id}>{item.beneficiario_nome} — {Number(item.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</option>)}</select></div></section>}
       {pagina === 'notas' && perfil.perfil === 'admin' && <section className="mx-auto max-w-[1180px] pb-7"><div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface p-4"><span className="text-sm text-gray-300">Editar nota fiscal existente</span><select className="min-w-60 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" defaultValue="" onChange={e => { const item = notasFiscaisWeb.find(nota => nota.id === Number(e.target.value)); if (!item) return; setEditandoNfId(item.id); setFormNf({ fornecedor_id: item.fornecedor_id ? String(item.fornecedor_id) : '', numero_nf: item.numero_nf ?? '', numero_pedido: '', valor: String(item.valor_total), vencimento: item.data || new Date().toISOString().slice(0, 10), data: item.data || new Date().toISOString().slice(0, 10) }); setNovaNf(true) }}><option value="">Selecione uma NF</option>{notasFiscaisWeb.filter(item => item.lote_id === null).map(item => <option key={item.id} value={item.id}>{item.fornecedor_nome} — NF {item.numero_nf ?? '—'}</option>)}</select></div></section>}
       {pagina === 'fornecedores' && <section className="mx-auto max-w-[1180px] pb-7"><div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface p-4"><span className="text-sm text-gray-300">Editar fornecedor</span><select className="min-w-60 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" defaultValue="" onChange={e => { const item = fornecedoresWeb.find(fornecedor => fornecedor.id === Number(e.target.value)); if (!item) return; setEditandoFornecedorId(item.id); setFormFornecedor({ nome: item.nome, tipo_pessoa: item.tipo_pessoa, cnpj: item.cnpj ?? '', cpf: item.cpf ?? '', email: item.email ?? '', telefone: item.telefone ?? '', categoria: item.categoria ?? '', forma_pagamento: item.forma_pagamento }); setNovoFornecedor(true) }}><option value="">Selecione um fornecedor</option>{fornecedoresWeb.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></div></section>}
+      {perfil.perfil === 'supervisor' && pagina === 'supervisor' && documentoFinanceiroId && anexosFinanceiros.length > 0 && <section className="mx-auto max-w-7xl pb-7"><div className="rounded-xl border border-brand-500/35 bg-surface p-4"><h3 className="font-semibold">Aplicar assinatura ao PDF</h3><p className="mt-1 text-sm text-gray-400">A assinatura é gravada em uma cópia do PDF no Storage; o arquivo original permanece preservado.</p><div className="mt-4 space-y-2">{anexosFinanceiros.map(anexo => <div key={anexo.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-surface-border bg-surface-card p-3"><span className="min-w-0 truncate text-sm">{caminhoStorage(anexo.caminho).split('/').at(-1) ?? 'Documento'}</span><button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={!carimboUrl || !caminhoStorage(anexo.caminho).toLowerCase().endsWith('.pdf')} onClick={() => void assinarPdfNoStorage(anexo.caminho)}>{!carimboUrl ? 'Cadastre a assinatura' : 'Assinar PDF'}</button></div>)}</div></div></section>}
     </main></div>
   </div>
 }
