@@ -548,6 +548,9 @@ function PortalWeb() {
   >("inicio");
   const [estadoSupervisor, setEstadoSupervisor] = useState<string | null>(null);
   const [loteSupervisorId, setLoteSupervisorId] = useState<number | null>(null);
+  const [loteAdminSelecionadoId, setLoteAdminSelecionadoId] = useState<
+    number | null
+  >(null);
   const [menuAberto, setMenuAberto] = useState(false);
   const [buscaColaborador, setBuscaColaborador] = useState("");
   const [filtroStatusRh, setFiltroStatusRh] = useState("todos");
@@ -2105,7 +2108,8 @@ function PortalWeb() {
       ...autorizacoesWeb
         .filter((item) => item.lote_id === loteId)
         .map((item) => ({
-          tipo: "AP",
+          id: item.id,
+          tipo: "ap" as const,
           nome: item.beneficiario_nome,
           referencia: item.descricao ?? "Autorização de pagamento",
           valor: item.valor,
@@ -2113,12 +2117,20 @@ function PortalWeb() {
       ...notasFiscaisWeb
         .filter((item) => item.lote_id === loteId)
         .map((item) => ({
-          tipo: "NF",
+          id: item.id,
+          tipo: "nf" as const,
           nome: item.fornecedor_nome,
           referencia: `NF ${item.numero_nf ?? "—"}`,
           valor: item.valor_total,
         })),
     ];
+  }
+
+  function abrirDocumentoDoLoteAdministrativo(tipo: "ap" | "nf", id: number) {
+    setDocumentoFinanceiroTipo(tipo);
+    setDocumentoFinanceiroId(String(id));
+    void carregarAnexosFinanceiros(tipo, String(id));
+    navegar(tipo === "ap" ? "ap" : "notas");
   }
 
   function exportarLoteAdministrativo(lote: LoteWeb) {
@@ -2127,7 +2139,7 @@ function PortalWeb() {
       "Tipo;Beneficiário/Fornecedor;Referência;Valor",
       ...itens.map(
         (item) =>
-          `${item.tipo};${item.nome};${item.referencia};${item.valor.toFixed(2)}`,
+          `${item.tipo.toUpperCase()};${item.nome};${item.referencia};${item.valor.toFixed(2)}`,
       ),
     ];
     const url = URL.createObjectURL(
@@ -6895,6 +6907,19 @@ function PortalWeb() {
                           <div className="mt-3 flex flex-wrap gap-2">
                             <button
                               type="button"
+                              className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium"
+                              onClick={() =>
+                                setLoteAdminSelecionadoId((atual) =>
+                                  atual === lote.id ? null : lote.id,
+                                )
+                              }
+                            >
+                              {loteAdminSelecionadoId === lote.id
+                                ? "Fechar conteúdo"
+                                : "Ver conteúdo"}
+                            </button>
+                            <button
+                              type="button"
                               className="rounded-lg border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
                               onClick={() => imprimirLoteAdministrativo(lote)}
                             >
@@ -6908,6 +6933,51 @@ function PortalWeb() {
                               Exportar CSV
                             </button>
                           </div>
+                          {loteAdminSelecionadoId === lote.id && (
+                            <div className="mt-4 overflow-hidden rounded-lg border border-surface-border bg-surface-card">
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-surface-border px-3 py-2">
+                                <p className="text-sm font-medium">
+                                  Itens do lote
+                                </p>
+                                <span className="text-xs text-gray-400">
+                                  {itensDoLoteAdministrativo(lote.id).length} documento(s)
+                                </span>
+                              </div>
+                              {itensDoLoteAdministrativo(lote.id).length === 0 ? (
+                                <p className="p-4 text-sm text-gray-400">
+                                  Este lote ainda não possui APs ou notas fiscais.
+                                </p>
+                              ) : (
+                                itensDoLoteAdministrativo(lote.id).map((item) => (
+                                  <div
+                                    key={`${item.tipo}-${item.id}`}
+                                    className="flex flex-col gap-3 border-b border-surface-border p-3 last:border-0 sm:flex-row sm:items-center sm:justify-between"
+                                  >
+                                    <div className="min-w-0">
+                                      <p className="truncate text-sm font-medium">
+                                        {item.nome}
+                                      </p>
+                                      <p className="mt-1 text-xs text-gray-400">
+                                        {item.tipo.toUpperCase()} · {item.referencia} · {item.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="self-start rounded-md border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover sm:self-auto"
+                                      onClick={() =>
+                                        abrirDocumentoDoLoteAdministrativo(
+                                          item.tipo,
+                                          item.id,
+                                        )
+                                      }
+                                    >
+                                      Abrir documento
+                                    </button>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
                         </article>
                       ))
                     )}
