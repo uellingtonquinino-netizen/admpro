@@ -13,6 +13,7 @@ type Perfil = {
   email: string
   perfil: string
   ativo: boolean | number
+  carimbo_url?: string | null
 }
 
 type ResumoObra = {
@@ -32,6 +33,8 @@ type SaidaAlmoxarifado = { id: number; data: string; produto_nome: string; produ
 type AutorizacaoWeb = { id: number; beneficiario_nome: string; descricao: string | null; valor: number; vencimento: string | null; aprovado_por: string | null; lote_id: number | null }
 type NotaFiscalWeb = { id: number; fornecedor_nome: string; numero_nf: string | null; data: string; valor_total: number; aprovado_por: string | null; lote_id: number | null }
 type AnexoFinanceiro = { id: number; caminho: string; categoria?: string; ordem: number }
+type FornecedorWeb = { id: number; nome: string; tipo_pessoa: string; cnpj: string | null; cpf: string | null; email: string | null; telefone: string | null; categoria: string | null; forma_pagamento: string }
+type LoteWeb = { id: number; numero: number | null; titulo: string; criado_por: string | null; created_at: string; enviado_em: string | null }
 type ResumoMaster = { obras: number; usuarios: number; supervisores: number; administradores: number }
 type UsuarioMaster = { id: number; nome: string; email: string; perfil: string; ativo: boolean | number }
 type ObraMaster = { id: number; nome: string; titulo_obra: string | null; estado: string | null }
@@ -79,6 +82,8 @@ const tiposSolicitacao: Record<string, string> = {
 function PortalWeb() {
   const [session, setSession] = useState<Session | null>(null)
   const [perfil, setPerfil] = useState<Perfil | null>(null)
+  const [carimboUrl, setCarimboUrl] = useState('')
+  const [salvandoCarimbo, setSalvandoCarimbo] = useState(false)
   const [resumo, setResumo] = useState<ResumoObra | null>(null)
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [colaboradoresWeb, setColaboradoresWeb] = useState<Colaborador[]>([])
@@ -87,6 +92,8 @@ function PortalWeb() {
   const [saidasWeb, setSaidasWeb] = useState<SaidaAlmoxarifado[]>([])
   const [autorizacoesWeb, setAutorizacoesWeb] = useState<AutorizacaoWeb[]>([])
   const [notasFiscaisWeb, setNotasFiscaisWeb] = useState<NotaFiscalWeb[]>([])
+  const [fornecedoresWeb, setFornecedoresWeb] = useState<FornecedorWeb[]>([])
+  const [lotesWeb, setLotesWeb] = useState<LoteWeb[]>([])
   const [resumoMaster, setResumoMaster] = useState<ResumoMaster | null>(null)
   const [usuariosMaster, setUsuariosMaster] = useState<UsuarioMaster[]>([])
   const [obrasMaster, setObrasMaster] = useState<ObraMaster[]>([])
@@ -109,12 +116,23 @@ function PortalWeb() {
   const [salvandoRespostaPessoal, setSalvandoRespostaPessoal] = useState(false)
   const [categoriasWeb, setCategoriasWeb] = useState<OpcaoFinanceira[]>([])
   const [contasWeb, setContasWeb] = useState<OpcaoFinanceira[]>([])
-  const [pagina, setPagina] = useState<'inicio' | 'financeiro' | 'ap' | 'notas' | 'rh' | 'almox' | 'estoque' | 'entradas' | 'saidas' | 'supervisor' | 'pessoal' | 'central'>('inicio')
+  const [pagina, setPagina] = useState<'inicio' | 'financeiro' | 'ap' | 'notas' | 'fornecedores' | 'lotes' | 'rh' | 'almox' | 'estoque' | 'entradas' | 'saidas' | 'supervisor' | 'pessoal' | 'central'>('inicio')
   const [menuAberto, setMenuAberto] = useState(false)
   const [buscaColaborador, setBuscaColaborador] = useState('')
   const [filtroStatusRh, setFiltroStatusRh] = useState('todos')
   const [buscaLancamento, setBuscaLancamento] = useState('')
   const [filtroTipoFinanceiro, setFiltroTipoFinanceiro] = useState('todos')
+  const [novoFornecedor, setNovoFornecedor] = useState(false)
+  const [salvandoFornecedor, setSalvandoFornecedor] = useState(false)
+  const [formFornecedor, setFormFornecedor] = useState({ nome: '', tipo_pessoa: 'pj', cnpj: '', cpf: '', email: '', telefone: '', categoria: '', forma_pagamento: 'boleto' })
+  const [novaAp, setNovaAp] = useState(false)
+  const [salvandoAp, setSalvandoAp] = useState(false)
+  const [formAp, setFormAp] = useState({ fornecedor_id: '', descricao: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), observacoes: '' })
+  const [novaNf, setNovaNf] = useState(false)
+  const [salvandoNf, setSalvandoNf] = useState(false)
+  const [formNf, setFormNf] = useState({ fornecedor_id: '', numero_nf: '', numero_pedido: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), data: new Date().toISOString().slice(0, 10) })
+  const [itensLoteSelecionados, setItensLoteSelecionados] = useState<Set<string>>(new Set())
+  const [processandoLote, setProcessandoLote] = useState(false)
   const [buscaProduto, setBuscaProduto] = useState('')
   const [novaEntrada, setNovaEntrada] = useState(false)
   const [salvandoEntrada, setSalvandoEntrada] = useState(false)
@@ -144,13 +162,14 @@ function PortalWeb() {
 
     const { data, error } = await supabase
       .from('usuarios')
-      .select('id,empresa_id,nome,email,perfil,ativo')
+      .select('id,empresa_id,nome,email,perfil,ativo,carimbo_url')
       .eq('auth_user_id', sessao.user.id)
       .maybeSingle()
     if (error) setErro(`Não foi possível carregar seu perfil: ${error.message}`)
     else if (!data || !data.ativo) setErro('Sua conta não está vinculada a um usuário ativo do sistema.')
     else {
       setPerfil(data)
+      setCarimboUrl(data.carimbo_url ?? '')
       setPagina(data.perfil === 'almoxarife' ? 'almox' : data.perfil === 'supervisor' ? 'supervisor' : data.perfil === 'setor_pessoal' ? 'pessoal' : data.perfil === 'central' ? 'central' : 'inicio')
       if (data.perfil === 'master') {
         const [obras, usuarios] = await Promise.all([
@@ -326,6 +345,12 @@ function PortalWeb() {
         ])
         if (erroAutorizacoes || erroNotasFiscais) setErro('Não foi possível carregar as autorizações e notas fiscais.')
         else { setAutorizacoesWeb(autorizacoes ?? []); setNotasFiscaisWeb(notasFiscais ?? []) }
+        const { data: fornecedores, error: erroFornecedores } = await supabase.from('fornecedores').select('id,nome,tipo_pessoa,cnpj,cpf,email,telefone,categoria,forma_pagamento').eq('empresa_id', data.empresa_id).eq('ativo', 1).order('nome')
+        if (erroFornecedores) setErro('Não foi possível carregar os fornecedores.')
+        else setFornecedoresWeb(fornecedores ?? [])
+        const { data: lotes, error: erroLotes } = await supabase.from('lotes_financeiros').select('id,numero,titulo,criado_por,created_at,enviado_em').eq('empresa_id', data.empresa_id).order('id', { ascending: false })
+        if (erroLotes) setErro('Não foi possível carregar os lotes financeiros.')
+        else setLotesWeb(lotes ?? [])
         const [categorias, contas] = await Promise.all([
           supabase.from('categorias').select('id,nome').eq('empresa_id', data.empresa_id).order('nome'),
           supabase.from('contas').select('id,nome').eq('empresa_id', data.empresa_id).order('nome'),
@@ -378,6 +403,88 @@ function PortalWeb() {
     if (error) { setErro(`Não foi possível salvar o lançamento: ${error.message}`); return }
     setNovoLancamento(false)
     setFormLancamento({ descricao: '', valor: '', tipo: 'despesa', data: new Date().toISOString().slice(0, 10), data_venc: '', categoria_id: '', conta_id: '' })
+    await carregarPerfil(session)
+  }
+
+  async function salvarFornecedor(evento: FormEvent) {
+    evento.preventDefault()
+    if (!perfil) return
+    setErro(''); setSalvandoFornecedor(true)
+    const { error } = await supabase.from('fornecedores').insert({
+      empresa_id: perfil.empresa_id, nome: formFornecedor.nome.trim(), tipo_pessoa: formFornecedor.tipo_pessoa,
+      cnpj: formFornecedor.tipo_pessoa === 'pj' ? formFornecedor.cnpj.trim() || null : null,
+      cpf: formFornecedor.tipo_pessoa === 'pf' ? formFornecedor.cpf.trim() || null : null,
+      email: formFornecedor.email.trim() || null, telefone: formFornecedor.telefone.trim() || null,
+      categoria: formFornecedor.categoria.trim() || null, forma_pagamento: formFornecedor.forma_pagamento,
+      ativo: 1,
+    })
+    setSalvandoFornecedor(false)
+    if (error) { setErro(`Não foi possível cadastrar o fornecedor: ${error.message}`); return }
+    setNovoFornecedor(false)
+    setFormFornecedor({ nome: '', tipo_pessoa: 'pj', cnpj: '', cpf: '', email: '', telefone: '', categoria: '', forma_pagamento: 'boleto' })
+    await carregarPerfil(session)
+  }
+
+  async function salvarAp(evento: FormEvent) {
+    evento.preventDefault()
+    if (!perfil) return
+    const fornecedor = fornecedoresWeb.find(item => item.id === Number(formAp.fornecedor_id))
+    if (!fornecedor) { setErro('Selecione o fornecedor da autorização.'); return }
+    setErro(''); setSalvandoAp(true)
+    const { error } = await supabase.rpc('criar_ap', { p: {
+      empresa_id: perfil.empresa_id, beneficiario_tipo: 'fornecedor', beneficiario_id: fornecedor.id,
+      beneficiario_nome: fornecedor.nome, descricao: formAp.descricao.trim(), observacoes: formAp.observacoes.trim(),
+      boletos: [{ valor: Number(formAp.valor), vencimento: formAp.vencimento }], solicitante: perfil.nome, autorizado_por: perfil.nome,
+    } })
+    setSalvandoAp(false)
+    if (error) { setErro(`Não foi possível criar a autorização: ${error.message}`); return }
+    setNovaAp(false); setFormAp({ fornecedor_id: '', descricao: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), observacoes: '' })
+    await carregarPerfil(session)
+  }
+
+  async function salvarNf(evento: FormEvent) {
+    evento.preventDefault()
+    if (!perfil) return
+    const fornecedor = fornecedoresWeb.find(item => item.id === Number(formNf.fornecedor_id))
+    if (!fornecedor) { setErro('Selecione o fornecedor da nota fiscal.'); return }
+    setErro(''); setSalvandoNf(true)
+    const { error } = await supabase.rpc('criar_nota_fiscal', { p: {
+      empresa_id: perfil.empresa_id, fornecedor_id: fornecedor.id, fornecedor_nome: fornecedor.nome,
+      numero_nf: formNf.numero_nf.trim(), numero_pedido: formNf.numero_pedido.trim(), data: formNf.data,
+      data_emissao_nf: formNf.data, boletos: [{ valor: Number(formNf.valor), vencimento: formNf.vencimento }],
+    } })
+    setSalvandoNf(false)
+    if (error) { setErro(`Não foi possível criar a nota fiscal: ${error.message}`); return }
+    setNovaNf(false); setFormNf({ fornecedor_id: '', numero_nf: '', numero_pedido: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), data: new Date().toISOString().slice(0, 10) })
+    await carregarPerfil(session)
+  }
+
+  function alternarItemLote(chave: string) {
+    setItensLoteSelecionados(atual => {
+      const proximo = new Set(atual)
+      proximo.has(chave) ? proximo.delete(chave) : proximo.add(chave)
+      return proximo
+    })
+  }
+
+  async function criarLoteFinanceiro() {
+    if (!perfil || itensLoteSelecionados.size === 0) { setErro('Selecione ao menos uma AP ou Nota Fiscal aprovada.'); return }
+    const apIds = [...itensLoteSelecionados].filter(item => item.startsWith('ap-')).map(item => Number(item.slice(3)))
+    const nfIds = [...itensLoteSelecionados].filter(item => item.startsWith('nf-')).map(item => Number(item.slice(3)))
+    setErro(''); setProcessandoLote(true)
+    const { error } = await supabase.rpc('fechar_lote_financeiro', { p: { empresa_id: perfil.empresa_id, ap_ids: apIds, nf_ids: nfIds, criado_por: perfil.nome } })
+    setProcessandoLote(false)
+    if (error) { setErro(`Não foi possível criar o lote: ${error.message}`); return }
+    setItensLoteSelecionados(new Set())
+    await carregarPerfil(session)
+  }
+
+  async function enviarLoteFinanceiro(loteId: number) {
+    if (!session) return
+    setErro(''); setProcessandoLote(true)
+    const { error } = await supabase.rpc('enviar_lotes_supervisor', { p_lote_ids: [loteId] })
+    setProcessandoLote(false)
+    if (error) { setErro(`Não foi possível enviar o lote: ${error.message}`); return }
     await carregarPerfil(session)
   }
 
@@ -592,6 +699,32 @@ function PortalWeb() {
     } catch (causa) { setErro(`Não foi possível imprimir o arquivo: ${causa instanceof Error ? causa.message : 'erro desconhecido'}`) }
   }
 
+  function selecionarCarimbo(arquivo: File | undefined) {
+    if (!arquivo) return
+    const leitor = new FileReader()
+    leitor.onload = () => {
+      const imagem = new Image()
+      imagem.onload = () => {
+        const limite = 400
+        const escala = Math.min(1, limite / Math.max(imagem.width, imagem.height))
+        const quadro = document.createElement('canvas')
+        quadro.width = imagem.width * escala; quadro.height = imagem.height * escala
+        quadro.getContext('2d')?.drawImage(imagem, 0, 0, quadro.width, quadro.height)
+        setCarimboUrl(quadro.toDataURL('image/png'))
+      }
+      imagem.src = String(leitor.result)
+    }
+    leitor.readAsDataURL(arquivo)
+  }
+
+  async function salvarCarimbo() {
+    setErro(''); setSalvandoCarimbo(true)
+    const { error } = await supabase.rpc('atualizar_meu_carimbo', { p_carimbo_url: carimboUrl || null })
+    setSalvandoCarimbo(false)
+    if (error) { setErro(`Não foi possível salvar a assinatura: ${error.message}`); return }
+    setPerfil(atual => atual ? { ...atual, carimbo_url: carimboUrl || null } : atual)
+  }
+
   if (carregando) return <main className="min-h-screen grid place-items-center bg-surface text-white">Carregando…</main>
 
   if (!session || !perfil) {
@@ -607,7 +740,7 @@ function PortalWeb() {
     </main>
   }
 
-  const navegar = (destino: 'inicio' | 'financeiro' | 'ap' | 'notas' | 'rh' | 'almox' | 'estoque' | 'entradas' | 'saidas' | 'supervisor' | 'pessoal' | 'central') => { setPagina(destino); setMenuAberto(false) }
+  const navegar = (destino: 'inicio' | 'financeiro' | 'ap' | 'notas' | 'fornecedores' | 'lotes' | 'rh' | 'almox' | 'estoque' | 'entradas' | 'saidas' | 'supervisor' | 'pessoal' | 'central') => { setPagina(destino); setMenuAberto(false) }
   const colaboradoresFiltrados = colaboradoresWeb.filter(item => {
     const correspondeBusca = `${item.nome} ${item.funcao ?? ''} ${item.setor ?? ''}`.toLowerCase().includes(buscaColaborador.toLowerCase())
     return correspondeBusca && (filtroStatusRh === 'todos' || item.status === filtroStatusRh)
@@ -645,6 +778,7 @@ function PortalWeb() {
         <div className="my-3 border-t border-surface-border" />
         <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">Financeiro</p>
         {perfil.perfil === 'gestor' && <><button className={pagina === 'ap' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('ap')}><Wallet size={15} />Autorizações de pagamento</button><button className={pagina === 'notas' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('notas')}><ClipboardList size={15} />Notas fiscais</button></>}
+        {perfil.perfil === 'admin' && <><button className={pagina === 'ap' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('ap')}><Wallet size={15} />Autorizações de pagamento</button><button className={pagina === 'notas' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('notas')}><ClipboardList size={15} />Notas fiscais</button><button className={pagina === 'lotes' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('lotes')}><ArrowLeftRight size={15} />Lotes enviados</button><button className={pagina === 'fornecedores' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('fornecedores')}><UsersRound size={15} />Fornecedores</button></>}
         {perfil.perfil === 'admin' && <button className={pagina === 'financeiro' ? 'flex w-full items-center gap-3 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium shadow-glow-sm' : 'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-surface-hover'} onClick={() => navegar('financeiro')}><Wallet size={15} />Lançamentos</button>}
       </nav>
       <div className="border-t border-surface-border pt-4"><div className="flex items-center gap-2.5 px-2"><div className="grid h-7 w-7 place-items-center rounded-full bg-brand-500/10 text-xs font-bold text-brand-400">{perfil.nome.slice(0, 2).toUpperCase()}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium text-gray-200">{perfil.nome}</p><p className="truncate text-[11px] text-gray-500">{nomesPerfil[perfil.perfil] ?? perfil.perfil}</p></div><button title="Sair" className="rounded-lg p-1.5 text-gray-500 hover:bg-red-500/10 hover:text-red-400" onClick={() => void supabase.auth.signOut()}><LogOut size={14} /></button></div></div>
@@ -679,6 +813,11 @@ function PortalWeb() {
       {pagina === 'notas' && <section className="mx-auto max-w-[1180px] py-2 md:py-4"><div className="mb-6"><p className="text-sm font-semibold text-brand-400">FINANCEIRO</p><h2 className="mt-1 text-2xl font-bold">Notas fiscais</h2><p className="mt-1 text-sm text-gray-400">Revise e autorize as notas fiscais da obra.</p></div><div className="overflow-x-auto rounded-xl border border-surface-border bg-surface"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-surface-card text-gray-400"><tr><th className="p-3">Fornecedor</th><th className="p-3">NF</th><th className="p-3">Data</th><th className="p-3 text-right">Valor</th><th className="p-3"></th></tr></thead><tbody>{notasFiscaisWeb.length === 0 ? <tr><td colSpan={5} className="p-6 text-gray-400">Nenhuma nota fiscal encontrada.</td></tr> : notasFiscaisWeb.map(item => <tr key={item.id} className="border-t border-surface-border"><td className="p-3 font-medium">{item.fornecedor_nome}</td><td className="p-3 text-gray-300">{item.numero_nf ?? '—'}</td><td className="p-3 text-gray-400">{item.data}</td><td className="p-3 text-right text-amber-300">{Number(item.valor_total).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td className="p-3 text-right">{item.aprovado_por ? <span className="text-xs text-emerald-300">Autorizada</span> : <button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={itemFinanceiroProcessando === `nf-${item.id}`} onClick={() => void aprovarItemFinanceiro('nf', item.id)}>{itemFinanceiroProcessando === `nf-${item.id}` ? 'Autorizando…' : 'Autorizar'}</button>}</td></tr>)}</tbody></table></div></section>}
       {['ap', 'notas'].includes(pagina) && <section className="mx-auto max-w-[1180px] pb-7"><div className="rounded-xl border border-surface-border bg-surface p-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="font-semibold">Documentos anexados</h3><p className="mt-1 text-sm text-gray-400">Visualize, baixe ou imprima os arquivos armazenados com segurança no Supabase.</p></div><div className="flex flex-wrap gap-2"><select aria-label="Tipo de documento" className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" value={documentoFinanceiroTipo} onChange={e => { const tipo = e.target.value as 'ap' | 'nf'; setDocumentoFinanceiroTipo(tipo); setDocumentoFinanceiroId(''); setAnexosFinanceiros([]) }}><option value="ap">Autorização de pagamento</option><option value="nf">Nota fiscal</option></select><select aria-label="Documento financeiro" className="max-w-72 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" value={documentoFinanceiroId} onChange={e => { setDocumentoFinanceiroId(e.target.value); void carregarAnexosFinanceiros(documentoFinanceiroTipo, e.target.value) }}><option value="">Selecione o documento</option>{(documentoFinanceiroTipo === 'ap' ? autorizacoesWeb : notasFiscaisWeb).map(item => <option key={item.id} value={item.id}>{documentoFinanceiroTipo === 'ap' ? `${(item as AutorizacaoWeb).beneficiario_nome} — ${(item as AutorizacaoWeb).valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : `${(item as NotaFiscalWeb).fornecedor_nome} — NF ${(item as NotaFiscalWeb).numero_nf ?? '—'}`}</option>)}</select></div></div>{documentoFinanceiroId && <><div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">{carregandoAnexosFinanceiros ? <p className="p-4 text-sm text-gray-400">Carregando anexos…</p> : anexosFinanceiros.length === 0 ? <p className="p-4 text-sm text-gray-400">Nenhum arquivo anexado a este documento.</p> : anexosFinanceiros.map((anexo, indice) => <div key={anexo.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><p className="min-w-0 truncate text-sm">{caminhoStorage(anexo.caminho).split('/').at(-1) ?? `Documento ${indice + 1}`}</p><div className="flex shrink-0 gap-2"><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void visualizarArquivo(anexo.caminho)}>Abrir</button><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void baixarArquivo(anexo.caminho)}>Baixar</button><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void imprimirArquivo(anexo.caminho)}>Imprimir</button></div></div>)}</div>{['admin', 'master'].includes(perfil.perfil) && <form onSubmit={enviarAnexosFinanceiros} className="mt-4 border-t border-surface-border pt-4"><label className="block text-sm text-gray-300">Anexar documentos<input className="mt-2 block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" type="file" multiple onChange={e => setNovosAnexosFinanceiros(Array.from(e.target.files ?? []))} required /></label>{novosAnexosFinanceiros.length > 0 && <p className="mt-2 text-xs text-gray-400">{novosAnexosFinanceiros.map(arquivo => arquivo.name).join(', ')}</p>}<button className="mt-3 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={enviandoAnexosFinanceiros}>{enviandoAnexosFinanceiros ? 'Enviando…' : 'Enviar anexos'}</button></form>}</>}</div></section>}
       {(pagina === 'supervisor' || pagina === 'central') && <section className="mx-auto max-w-7xl pb-7"><div className="rounded-xl border border-surface-border bg-surface p-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="font-semibold">Documentos dos itens em análise</h3><p className="mt-1 text-sm text-gray-400">Abra, baixe ou imprima os anexos antes de registrar sua aprovação.</p></div><div className="flex flex-wrap gap-2"><select aria-label="Tipo de documento" className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" value={documentoFinanceiroTipo} onChange={e => { const tipo = e.target.value as 'ap' | 'nf'; setDocumentoFinanceiroTipo(tipo); setDocumentoFinanceiroId(''); setAnexosFinanceiros([]) }}><option value="ap">Autorização de pagamento</option><option value="nf">Nota fiscal</option></select><select aria-label="Documento financeiro" className="max-w-72 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" value={documentoFinanceiroId} onChange={e => { setDocumentoFinanceiroId(e.target.value); void carregarAnexosFinanceiros(documentoFinanceiroTipo, e.target.value) }}><option value="">Selecione o documento</option>{(documentoFinanceiroTipo === 'ap' ? autorizacoesWeb : notasFiscaisWeb).map(item => <option key={item.id} value={item.id}>{documentoFinanceiroTipo === 'ap' ? (item as AutorizacaoWeb).beneficiario_nome : `${(item as NotaFiscalWeb).fornecedor_nome} — NF ${(item as NotaFiscalWeb).numero_nf ?? '—'}`}</option>)}</select></div></div>{documentoFinanceiroId && <div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">{carregandoAnexosFinanceiros ? <p className="p-4 text-sm text-gray-400">Carregando anexos…</p> : anexosFinanceiros.length === 0 ? <p className="p-4 text-sm text-gray-400">Nenhum arquivo anexado a este documento.</p> : anexosFinanceiros.map((anexo, indice) => <div key={anexo.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><p className="min-w-0 truncate text-sm">{caminhoStorage(anexo.caminho).split('/').at(-1) ?? `Documento ${indice + 1}`}</p><div className="flex shrink-0 gap-2"><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void visualizarArquivo(anexo.caminho)}>Abrir</button><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void baixarArquivo(anexo.caminho)}>Baixar</button><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void imprimirArquivo(anexo.caminho)}>Imprimir</button></div></div>)}</div>}</div></section>}
+      {pagina === 'ap' && perfil.perfil === 'admin' && <section className="mx-auto max-w-[1180px] pb-7"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-border bg-surface p-4"><div><p className="font-semibold">Nova autorização de pagamento</p><p className="mt-1 text-sm text-gray-400">O lançamento financeiro é criado junto com a autorização.</p></div><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium" onClick={() => setNovaAp(aberto => !aberto)}>{novaAp ? 'Cancelar' : '+ Nova AP'}</button></div>{novaAp && <form onSubmit={salvarAp} className="mt-4 grid gap-3 rounded-xl border border-surface-border bg-surface p-4 md:grid-cols-2"><label className="text-sm text-gray-300">Fornecedor<select className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formAp.fornecedor_id} onChange={e => setFormAp({ ...formAp, fornecedor_id: e.target.value })} required><option value="">Selecione</option>{fornecedoresWeb.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label><label className="text-sm text-gray-300">Vencimento<input type="date" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formAp.vencimento} onChange={e => setFormAp({ ...formAp, vencimento: e.target.value })} required /></label><label className="text-sm text-gray-300 md:col-span-2">Descrição<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formAp.descricao} onChange={e => setFormAp({ ...formAp, descricao: e.target.value })} required /></label><label className="text-sm text-gray-300">Valor<input type="number" min="0.01" step="0.01" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formAp.valor} onChange={e => setFormAp({ ...formAp, valor: e.target.value })} required /></label><label className="text-sm text-gray-300">Observações<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formAp.observacoes} onChange={e => setFormAp({ ...formAp, observacoes: e.target.value })} /></label><div className="md:col-span-2"><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={salvandoAp}>{salvandoAp ? 'Criando…' : 'Criar autorização'}</button></div></form>}</section>}
+      {pagina === 'notas' && perfil.perfil === 'admin' && <section className="mx-auto max-w-[1180px] pb-7"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-border bg-surface p-4"><div><p className="font-semibold">Nova nota fiscal</p><p className="mt-1 text-sm text-gray-400">O boleto e o lançamento financeiro são criados juntos.</p></div><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium" onClick={() => setNovaNf(aberto => !aberto)}>{novaNf ? 'Cancelar' : '+ Nova nota'}</button></div>{novaNf && <form onSubmit={salvarNf} className="mt-4 grid gap-3 rounded-xl border border-surface-border bg-surface p-4 md:grid-cols-2"><label className="text-sm text-gray-300">Fornecedor<select className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formNf.fornecedor_id} onChange={e => setFormNf({ ...formNf, fornecedor_id: e.target.value })} required><option value="">Selecione</option>{fornecedoresWeb.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></label><label className="text-sm text-gray-300">Número NF<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formNf.numero_nf} onChange={e => setFormNf({ ...formNf, numero_nf: e.target.value })} /></label><label className="text-sm text-gray-300">Número do pedido<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formNf.numero_pedido} onChange={e => setFormNf({ ...formNf, numero_pedido: e.target.value })} /></label><label className="text-sm text-gray-300">Data de emissão<input type="date" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formNf.data} onChange={e => setFormNf({ ...formNf, data: e.target.value })} required /></label><label className="text-sm text-gray-300">Valor<input type="number" min="0.01" step="0.01" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formNf.valor} onChange={e => setFormNf({ ...formNf, valor: e.target.value })} required /></label><label className="text-sm text-gray-300">Vencimento<input type="date" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formNf.vencimento} onChange={e => setFormNf({ ...formNf, vencimento: e.target.value })} required /></label><div className="md:col-span-2"><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={salvandoNf}>{salvandoNf ? 'Criando…' : 'Criar nota fiscal'}</button></div></form>}</section>}
+      {pagina === 'fornecedores' && <section className="mx-auto max-w-[1180px] py-2 md:py-4"><div className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm font-semibold text-brand-400">FINANCEIRO</p><h2 className="mt-1 text-2xl font-bold">Fornecedores</h2><p className="mt-1 text-sm text-gray-400">Cadastros usados nas autorizações, notas fiscais e entradas.</p></div><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium" onClick={() => setNovoFornecedor(aberto => !aberto)}>{novoFornecedor ? 'Cancelar' : '+ Novo fornecedor'}</button></div>{novoFornecedor && <form onSubmit={salvarFornecedor} className="mb-5 grid gap-3 rounded-xl border border-surface-border bg-surface p-4 md:grid-cols-2"><label className="text-sm text-gray-300 md:col-span-2">Nome/Razão social<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.nome} onChange={e => setFormFornecedor({ ...formFornecedor, nome: e.target.value })} required /></label><label className="text-sm text-gray-300">Tipo<select className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.tipo_pessoa} onChange={e => setFormFornecedor({ ...formFornecedor, tipo_pessoa: e.target.value })}><option value="pj">Pessoa jurídica</option><option value="pf">Pessoa física</option></select></label><label className="text-sm text-gray-300">{formFornecedor.tipo_pessoa === 'pj' ? 'CNPJ' : 'CPF'}<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.tipo_pessoa === 'pj' ? formFornecedor.cnpj : formFornecedor.cpf} onChange={e => setFormFornecedor(formFornecedor.tipo_pessoa === 'pj' ? { ...formFornecedor, cnpj: e.target.value } : { ...formFornecedor, cpf: e.target.value })} /></label><label className="text-sm text-gray-300">E-mail<input type="email" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.email} onChange={e => setFormFornecedor({ ...formFornecedor, email: e.target.value })} /></label><label className="text-sm text-gray-300">Telefone<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.telefone} onChange={e => setFormFornecedor({ ...formFornecedor, telefone: e.target.value })} /></label><label className="text-sm text-gray-300">Categoria<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.categoria} onChange={e => setFormFornecedor({ ...formFornecedor, categoria: e.target.value })} /></label><label className="text-sm text-gray-300">Forma de pagamento<select className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.forma_pagamento} onChange={e => setFormFornecedor({ ...formFornecedor, forma_pagamento: e.target.value })}><option value="boleto">Boleto</option><option value="conta">Conta / PIX</option></select></label><div className="md:col-span-2"><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={salvandoFornecedor}>{salvandoFornecedor ? 'Salvando…' : 'Cadastrar fornecedor'}</button></div></form>}<div className="overflow-x-auto rounded-xl border border-surface-border bg-surface"><table className="w-full min-w-[640px] text-left text-sm"><thead className="bg-surface-card text-gray-400"><tr><th className="p-3">Nome</th><th className="p-3">Documento</th><th className="p-3">Contato</th><th className="p-3">Categoria</th></tr></thead><tbody>{fornecedoresWeb.length === 0 ? <tr><td colSpan={4} className="p-6 text-gray-400">Nenhum fornecedor cadastrado.</td></tr> : fornecedoresWeb.map(item => <tr key={item.id} className="border-t border-surface-border"><td className="p-3 font-medium">{item.nome}</td><td className="p-3 text-gray-300">{item.cnpj ?? item.cpf ?? '—'}</td><td className="p-3 text-gray-300">{item.email ?? item.telefone ?? '—'}</td><td className="p-3 text-gray-400">{item.categoria ?? '—'}</td></tr>)}</tbody></table></div></section>}
+      {pagina === 'lotes' && <section className="mx-auto max-w-[1180px] py-2 md:py-4"><div className="mb-6"><p className="text-sm font-semibold text-brand-400">FINANCEIRO</p><h2 className="mt-1 text-2xl font-bold">Lotes financeiros</h2><p className="mt-1 text-sm text-gray-400">Agrupe itens autorizados e envie-os para a aprovação do Supervisor.</p></div><div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(360px,1fr)]"><section className="rounded-xl border border-surface-border bg-surface p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Itens disponíveis</h3><p className="mt-1 text-sm text-gray-400">Apenas APs e NFs autorizadas que ainda não estão em lote.</p></div><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={processandoLote || itensLoteSelecionados.size === 0} onClick={() => void criarLoteFinanceiro()}>{processandoLote ? 'Criando…' : `Criar lote (${itensLoteSelecionados.size})`}</button></div><div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">{[...autorizacoesWeb.filter(item => !!item.aprovado_por && item.lote_id === null).map(item => ({ chave: `ap-${item.id}`, tipo: 'AP', nome: item.beneficiario_nome, detalhe: item.descricao ?? 'Autorização de pagamento', valor: item.valor })), ...notasFiscaisWeb.filter(item => !!item.aprovado_por && item.lote_id === null).map(item => ({ chave: `nf-${item.id}`, tipo: 'NF', nome: item.fornecedor_nome, detalhe: `NF ${item.numero_nf ?? '—'}`, valor: item.valor_total }))].map(item => <label key={item.chave} className="flex cursor-pointer items-center gap-3 p-3 hover:bg-surface-hover"><input type="checkbox" className="h-4 w-4 accent-blue-600" checked={itensLoteSelecionados.has(item.chave)} onChange={() => alternarItemLote(item.chave)} /><span className="min-w-0 flex-1"><span className="mr-2 rounded bg-brand-500/15 px-1.5 py-0.5 text-[10px] font-bold text-brand-300">{item.tipo}</span><strong className="text-sm">{item.nome}</strong><span className="block truncate text-xs text-gray-400">{item.detalhe}</span></span><span className="shrink-0 text-sm text-amber-300">{Number(item.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></label>)}{autorizacoesWeb.filter(item => !!item.aprovado_por && item.lote_id === null).length + notasFiscaisWeb.filter(item => !!item.aprovado_por && item.lote_id === null).length === 0 && <p className="p-5 text-sm text-gray-400">Não há itens autorizados disponíveis para lote.</p>}</div></section><section className="rounded-xl border border-surface-border bg-surface p-4"><h3 className="font-semibold">Lotes criados</h3><p className="mt-1 text-sm text-gray-400">Envie os lotes abertos ao Supervisor.</p><div className="mt-4 divide-y divide-surface-border">{lotesWeb.length === 0 ? <p className="py-5 text-sm text-gray-400">Nenhum lote criado.</p> : lotesWeb.map(lote => <article key={lote.id} className="py-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-medium">{lote.titulo}</p><p className="mt-1 text-xs text-gray-400">{lote.enviado_em ? `Enviado em ${lote.enviado_em.slice(0, 10)}` : 'Aguardando envio'} </p></div>{lote.enviado_em ? <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-300">Enviado</span> : <button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={processandoLote} onClick={() => void enviarLoteFinanceiro(lote.id)}>{processandoLote ? 'Enviando…' : 'Enviar ao Supervisor'}</button>}</div></article>)}</div></section></div></section>}
+      {perfil.perfil === 'supervisor' && pagina === 'supervisor' && <section className="mx-auto max-w-7xl pb-7"><div className="rounded-xl border border-surface-border bg-surface p-4"><div><h3 className="font-semibold">Assinatura do Supervisor</h3><p className="mt-1 text-sm text-gray-400">Esta assinatura identifica suas aprovações; a data, hora e usuário ficam registrados no Supabase.</p></div><div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center"><div className="grid h-24 w-48 place-items-center rounded-lg border border-dashed border-surface-border bg-surface-card">{carimboUrl ? <img src={carimboUrl} alt="Assinatura cadastrada" className="h-full w-full object-contain p-2" /> : <span className="text-xs text-gray-500">Nenhuma assinatura cadastrada</span>}</div><div><input className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" type="file" accept="image/*" onChange={e => selecionarCarimbo(e.target.files?.[0])} /><div className="mt-3 flex gap-2"><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={salvandoCarimbo} onClick={() => void salvarCarimbo()}>{salvandoCarimbo ? 'Salvando…' : 'Salvar assinatura'}</button>{carimboUrl && <button className="rounded-lg border border-surface-border px-4 py-2.5 text-sm text-gray-200" onClick={() => setCarimboUrl('')}>Remover</button>}</div></div></div></div></section>}
     </main></div>
   </div>
 }
