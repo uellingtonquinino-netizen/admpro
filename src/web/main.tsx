@@ -641,6 +641,12 @@ function PortalWeb() {
   const [buscaProduto, setBuscaProduto] = useState("");
   const [novoProduto, setNovoProduto] = useState(false);
   const [salvandoProduto, setSalvandoProduto] = useState(false);
+  const [editandoProdutoId, setEditandoProdutoId] = useState<number | null>(
+    null,
+  );
+  const [excluindoProdutoId, setExcluindoProdutoId] = useState<number | null>(
+    null,
+  );
   const [formProduto, setFormProduto] = useState({
     codigo: "",
     nome: "",
@@ -1927,23 +1933,49 @@ function PortalWeb() {
     }
     setErro("");
     setSalvandoProduto(true);
-    const { error } = await supabase.from("produtos").insert({
+    const dadosProduto = {
       empresa_id: perfil.empresa_id,
       codigo: formProduto.codigo.trim(),
       nome: formProduto.nome.trim(),
       unidade: formProduto.unidade.trim() || "UN",
-      estoque_atual: 0,
       estoque_minimo: Number(formProduto.estoque_minimo || 0),
       valor_unitario: Number(formProduto.valor_unitario || 0),
-      ativo: 1,
-    });
+    };
+    const { error } = editandoProdutoId
+      ? await supabase.from("produtos").update(dadosProduto).eq("id", editandoProdutoId)
+      : await supabase.from("produtos").insert({ ...dadosProduto, estoque_atual: 0, ativo: 1 });
     setSalvandoProduto(false);
     if (error) {
       setErro(`Não foi possível cadastrar o material: ${error.message}`);
       return;
     }
     setNovoProduto(false);
+    setEditandoProdutoId(null);
     setFormProduto({ codigo: "", nome: "", unidade: "UN", estoque_minimo: "0", valor_unitario: "0" });
+    await carregarPerfil(session);
+  }
+
+  function editarProduto(item: Produto) {
+    setEditandoProdutoId(item.id);
+    setFormProduto({
+      codigo: item.codigo,
+      nome: item.nome,
+      unidade: item.unidade ?? "UN",
+      estoque_minimo: String(item.estoque_minimo),
+      valor_unitario: String(item.valor_unitario),
+    });
+    setNovoProduto(true);
+  }
+
+  async function excluirProduto(item: Produto) {
+    if (!session || !window.confirm(`Excluir o material “${item.nome}”?`)) return;
+    setExcluindoProdutoId(item.id);
+    const { error } = await supabase.from("produtos").delete().eq("id", item.id);
+    setExcluindoProdutoId(null);
+    if (error) {
+      setErro(`Não foi possível excluir o material: ${error.message}`);
+      return;
+    }
     await carregarPerfil(session);
   }
 
@@ -5601,7 +5633,7 @@ function PortalWeb() {
               </div>
               {perfil.perfil !== "gestor" && (
                 <div className="mb-4">
-                  <button type="button" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium" onClick={() => setNovoProduto((aberto) => !aberto)}>
+                  <button type="button" className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium" onClick={() => { setEditandoProdutoId(null); setNovoProduto((aberto) => !aberto); }}>
                     {novoProduto ? "Cancelar" : "+ Novo material"}
                   </button>
                   {novoProduto && (
@@ -5611,7 +5643,7 @@ function PortalWeb() {
                       <input className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Unidade" value={formProduto.unidade} onChange={(e) => setFormProduto({ ...formProduto, unidade: e.target.value })} />
                       <input type="number" min="0" className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Estoque mínimo" value={formProduto.estoque_minimo} onChange={(e) => setFormProduto({ ...formProduto, estoque_minimo: e.target.value })} />
                       <input type="number" min="0" step="0.01" className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Valor unitário" value={formProduto.valor_unitario} onChange={(e) => setFormProduto({ ...formProduto, valor_unitario: e.target.value })} />
-                      <button disabled={salvandoProduto} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60">{salvandoProduto ? "Salvando…" : "Cadastrar material"}</button>
+                      <button disabled={salvandoProduto} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60">{salvandoProduto ? "Salvando…" : editandoProdutoId ? "Salvar alterações" : "Cadastrar material"}</button>
                     </form>
                   )}
                 </div>
@@ -5670,9 +5702,15 @@ function PortalWeb() {
                               { style: "currency", currency: "BRL" },
                             )}
                           </p>
+                          </div>
                         </div>
-                      </div>
-                    </article>
+                        {perfil.perfil !== "gestor" && (
+                          <div className="mt-4 flex gap-2 border-t border-surface-border pt-3">
+                            <button type="button" className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-brand-300" onClick={() => editarProduto(item)}>Editar</button>
+                            <button type="button" className="rounded-md border border-red-500/30 px-3 py-1.5 text-xs text-red-300 disabled:opacity-60" disabled={excluindoProdutoId === item.id} onClick={() => void excluirProduto(item)}>{excluindoProdutoId === item.id ? "Excluindo…" : "Excluir"}</button>
+                          </div>
+                        )}
+                      </article>
                   ))
                 )}
               </div>
@@ -5684,12 +5722,13 @@ function PortalWeb() {
                       <th className="p-3">Produto</th>
                       <th className="p-3">Estoque</th>
                       <th className="p-3 text-right">Valor unitário</th>
+                      {perfil.perfil !== "gestor" && <th className="p-3" />}
                     </tr>
                   </thead>
                   <tbody>
                     {produtosFiltrados.length === 0 ? (
                       <tr>
-                        <td className="p-5 text-gray-400" colSpan={4}>
+                        <td className="p-5 text-gray-400" colSpan={perfil.perfil !== "gestor" ? 5 : 4}>
                           Nenhum produto encontrado.
                         </td>
                       </tr>
@@ -5717,6 +5756,9 @@ function PortalWeb() {
                               { style: "currency", currency: "BRL" },
                             )}
                           </td>
+                          {perfil.perfil !== "gestor" && (
+                            <td className="p-3"><div className="flex justify-end gap-2"><button type="button" className="text-xs text-brand-300" onClick={() => editarProduto(item)}>Editar</button><button type="button" className="text-xs text-red-300" onClick={() => void excluirProduto(item)}>Excluir</button></div></td>
+                          )}
                         </tr>
                       ))
                     )}
