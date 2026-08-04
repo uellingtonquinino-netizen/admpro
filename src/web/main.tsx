@@ -622,6 +622,9 @@ function PortalWeb() {
   const [editandoLancamentoId, setEditandoLancamentoId] = useState<
     number | null
   >(null);
+  const [excluindoLancamentoId, setExcluindoLancamentoId] = useState<
+    number | null
+  >(null);
   const [salvandoLancamento, setSalvandoLancamento] = useState(false);
   const [formLancamento, setFormLancamento] = useState({
     descricao: "",
@@ -1421,6 +1424,22 @@ function PortalWeb() {
       conta_id: String(item.conta_id),
     });
     setNovoLancamento(true);
+  }
+
+  async function excluirLancamento(item: Lancamento) {
+    if (!session) return;
+    if (!window.confirm(`Excluir o lançamento “${item.descricao}”?`)) return;
+    setErro("");
+    setExcluindoLancamentoId(item.id);
+    const { error } = await supabase.rpc("excluir_lancamento", {
+      p_id: item.id,
+    });
+    setExcluindoLancamentoId(null);
+    if (error) {
+      setErro(`Não foi possível excluir o lançamento: ${error.message}`);
+      return;
+    }
+    await carregarPerfil(session);
   }
 
   async function salvarFornecedor(evento: FormEvent) {
@@ -4465,13 +4484,25 @@ function PortalWeb() {
                           </strong>
                         </div>
                         {perfil.perfil === "admin" && (
-                          <button
-                            type="button"
-                            className="mt-4 rounded-lg border border-surface-border px-3 py-2 text-xs hover:bg-surface-hover"
-                            onClick={() => editarLancamento(item)}
-                          >
-                            Editar lançamento
-                          </button>
+                          <div className="mt-4 flex gap-2">
+                            <button
+                              type="button"
+                              className="rounded-lg border border-surface-border px-3 py-2 text-xs hover:bg-surface-hover"
+                              onClick={() => editarLancamento(item)}
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-lg border border-red-500/40 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-60"
+                              disabled={excluindoLancamentoId === item.id}
+                              onClick={() => void excluirLancamento(item)}
+                            >
+                              {excluindoLancamentoId === item.id
+                                ? "Excluindo…"
+                                : "Excluir"}
+                            </button>
+                          </div>
                         )}
                       </article>
                     ))
@@ -4523,13 +4554,25 @@ function PortalWeb() {
                             </td>
                             <td className="p-3 text-right">
                               {perfil.perfil === "admin" && (
-                                <button
-                                  type="button"
-                                  className="rounded-lg border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
-                                  onClick={() => editarLancamento(item)}
-                                >
-                                  Editar
-                                </button>
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                                    onClick={() => editarLancamento(item)}
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-60"
+                                    disabled={excluindoLancamentoId === item.id}
+                                    onClick={() => void excluirLancamento(item)}
+                                  >
+                                    {excluindoLancamentoId === item.id
+                                      ? "Excluindo…"
+                                      : "Excluir"}
+                                  </button>
+                                </div>
                               )}
                             </td>
                           </tr>
