@@ -42,7 +42,7 @@ import "./web.css";
 
 type Perfil = {
   id: number;
-  empresa_id: number;
+  empresa_id?: number;
   nome: string;
   email: string;
   perfil: string;
@@ -152,6 +152,7 @@ type FornecedorWeb = {
 };
 type LoteWeb = {
   id: number;
+  empresa_id?: number;
   numero: number | null;
   titulo: string;
   criado_por: string | null;
@@ -533,9 +534,13 @@ function PortalWeb() {
     | "entradas"
     | "saidas"
     | "supervisor"
+    | "supervisor_estados"
+    | "supervisor_obra"
+    | "supervisor_configuracoes"
     | "pessoal"
     | "central"
   >("inicio");
+  const [estadoSupervisor, setEstadoSupervisor] = useState<string | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
   const [buscaColaborador, setBuscaColaborador] = useState("");
   const [filtroStatusRh, setFiltroStatusRh] = useState("todos");
@@ -757,7 +762,7 @@ function PortalWeb() {
             .in("empresa_id", empresaIds),
           supabase
             .from("lotes_financeiros")
-            .select("id,numero,titulo,criado_por,created_at,enviado_em")
+            .select("id,empresa_id,numero,titulo,criado_por,created_at,enviado_em")
             .in("empresa_id", empresaIds)
             .not("enviado_em", "is", null)
             .order("created_at", { ascending: false }),
@@ -2156,6 +2161,9 @@ function PortalWeb() {
       | "entradas"
       | "saidas"
       | "supervisor"
+      | "supervisor_estados"
+      | "supervisor_obra"
+      | "supervisor_configuracoes"
       | "pessoal"
       | "central",
   ) => {
@@ -3001,6 +3009,8 @@ function PortalWeb() {
               </div>
             </section>
           )}
+          {perfil.perfil === "supervisor" && pagina === "supervisor_estados" && resumoSupervisor && <section className="mx-auto max-w-7xl py-4"><button className="text-sm text-brand-300" onClick={() => navegar("supervisor")}>← Voltar ao Painel de Resumo</button><h2 className="mt-4 text-2xl font-bold">Obras por estado</h2><p className="mt-1 text-sm text-gray-400">Selecione um estado para ver as obras sob sua gestão.</p><div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{[...new Set(resumoSupervisor.obras.map(obra => obra.estado || 'Sem estado'))].map(estado => <button key={estado} className="rounded-2xl border border-surface-border bg-surface p-5 text-left hover:border-brand-500" onClick={() => { setEstadoSupervisor(estado); navegar("supervisor_obra") }}><p className="text-xs font-bold uppercase text-brand-300">Estado</p><p className="mt-2 text-xl font-bold">{estado}</p><p className="mt-2 text-sm text-gray-400">{resumoSupervisor.obras.filter(obra => (obra.estado || 'Sem estado') === estado).length} obra(s)</p></button>)}</div></section>}
+          {perfil.perfil === "supervisor" && pagina === "supervisor_obra" && resumoSupervisor && <section className="mx-auto max-w-7xl py-4"><button className="text-sm text-brand-300" onClick={() => navegar("supervisor_estados")}>← Voltar aos estados</button><h2 className="mt-4 text-2xl font-bold">{estadoSupervisor || 'Obras'}</h2><div className="mt-6 grid gap-4 lg:grid-cols-2">{resumoSupervisor.obras.filter(obra => (obra.estado || 'Sem estado') === estadoSupervisor).map(obra => <article key={obra.id} className="rounded-2xl border border-surface-border bg-surface p-5"><p className="text-lg font-bold">{obra.titulo_obra || obra.nome}</p><p className="mt-1 text-sm text-gray-400">{obra.nome}</p><div className="mt-4 border-t border-surface-border pt-4"><p className="text-sm font-semibold">Programação financeira</p>{lotesWeb.filter(lote => lote.empresa_id === obra.id).length === 0 ? <p className="mt-2 text-sm text-gray-400">Nenhum lote enviado para esta obra.</p> : lotesWeb.filter(lote => lote.empresa_id === obra.id).map(lote => <div key={lote.id} className="mt-2 rounded-lg bg-surface-card p-3 text-sm"><strong>{lote.titulo}</strong><span className="ml-2 text-gray-400">{lote.enviado_em ? new Date(lote.enviado_em).toLocaleDateString('pt-BR') : ''}</span></div>)}</div></article>)}</div></section>}
           {perfil.perfil === "supervisor" &&
             pagina === "supervisor" &&
             resumoSupervisor && (
@@ -3088,9 +3098,9 @@ function PortalWeb() {
                           Organizadas por estado, como no painel desktop.
                         </p>
                       </div>
-                      <span className="rounded-lg bg-surface-hover px-3 py-1.5 text-sm text-gray-300">
-                        {resumoSupervisor.obras.length} obra(s)
-                      </span>
+                      <button className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white" onClick={() => { setEstadoSupervisor(null); navegar("supervisor_estados") }}>
+                        Ver obras ({resumoSupervisor.obras.length})
+                      </button>
                     </div>
                     <div className="mt-4 divide-y divide-surface-border">
                       {resumoSupervisor.obras.length === 0 ? (
@@ -5714,7 +5724,7 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {perfil.perfil === "supervisor" && pagina === "supervisor" && (
+          {perfil.perfil === "supervisor" && pagina === "supervisor_configuracoes" && (
             <section className="mx-auto max-w-7xl pb-7">
               <div className="rounded-xl border border-surface-border bg-surface p-4">
                 <div>
