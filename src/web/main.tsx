@@ -2371,6 +2371,19 @@ function PortalWeb() {
               Configurações
             </button>
           )}
+          {perfil.perfil === "admin" && (
+            <button
+              className={
+                pagina === "supervisor_configuracoes"
+                  ? "flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm"
+                  : "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover"
+              }
+              onClick={() => navegar("supervisor_configuracoes")}
+            >
+              <ClipboardList size={16} />
+              Configurações
+            </button>
+          )}
           {perfil.perfil === "setor_pessoal" && (
             <button
               className={
@@ -5961,7 +5974,7 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {["supervisor", "gestor"].includes(perfil.perfil) &&
+          {["supervisor", "gestor", "admin"].includes(perfil.perfil) &&
             pagina === "supervisor_configuracoes" && (
               <section className="mx-auto max-w-7xl pb-7">
                 <div className="rounded-xl border border-surface-border bg-surface p-4">
@@ -6539,7 +6552,7 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {["supervisor", "gestor"].includes(perfil.perfil) &&
+          {["supervisor", "gestor", "admin"].includes(perfil.perfil) &&
             pagina === "supervisor_configuracoes" && (
               <section className="mx-auto max-w-7xl pb-7">
                 <div className="rounded-xl border border-surface-border bg-surface p-4">
@@ -6713,7 +6726,7 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {["supervisor", "gestor"].includes(perfil.perfil) &&
+          {["supervisor", "gestor", "admin"].includes(perfil.perfil) &&
             ["supervisor", "ap", "notas"].includes(pagina) &&
             documentoFinanceiroId &&
             anexosFinanceiros.length > 0 && (
