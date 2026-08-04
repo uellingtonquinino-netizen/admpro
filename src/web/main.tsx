@@ -89,6 +89,7 @@ type Colaborador = {
 };
 type Produto = {
   id: number;
+  empresa_id?: number;
   codigo: string;
   nome: string;
   unidade: string | null;
@@ -898,6 +899,8 @@ function PortalWeb() {
               })),
           ]);
           setLotesWeb(lotes ?? []);
+          const { data: produtosSupervisor } = await supabase.from("produtos").select("id,empresa_id,codigo,nome,unidade,estoque_atual,estoque_minimo,valor_unitario").in("empresa_id", empresaIds).order("nome");
+          setProdutosWeb(produtosSupervisor ?? []);
           setAutorizacoesWeb(
             (autorizacoes ?? []).map((item) => ({
               id: item.id,
@@ -3121,7 +3124,7 @@ function PortalWeb() {
                         </div>
                         <div className="mt-5 rounded-xl border border-surface-border bg-[#1f2d46] p-4">
                           <div className="flex items-center gap-2"><Boxes size={16} className="text-brand-300" /><p className="text-sm font-semibold">Estoque</p></div>
-                          <div className="mt-4 grid gap-3 md:grid-cols-3"><div className="rounded-lg border border-red-500/35 bg-red-500/10 p-3"><p className="text-sm font-semibold">Estoque Zerado</p><p className="mt-1 text-xs text-gray-400">Nenhum material/ferramenta zerado.</p></div><div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3"><p className="text-sm font-semibold">Estoque Acabando</p><p className="mt-1 text-xs text-gray-400">Nenhum material/ferramenta acabando.</p></div><div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-3"><p className="text-sm font-semibold">Valor total do estoque</p><p className="mt-2 text-xl font-bold text-emerald-300">R$ 0,00</p></div></div>
+                          {(() => { const estoque = produtosWeb.filter(item => item.empresa_id === obra.id); const zerados = estoque.filter(item => Number(item.estoque_atual) <= 0); const baixos = estoque.filter(item => Number(item.estoque_atual) > 0 && Number(item.estoque_atual) <= Number(item.estoque_minimo)); const valor = estoque.reduce((total, item) => total + Number(item.estoque_atual) * Number(item.valor_unitario), 0); return <div className="mt-4 grid gap-3 md:grid-cols-3"><div className="rounded-lg border border-red-500/35 bg-red-500/10 p-3"><p className="text-sm font-semibold">Estoque Zerado</p><p className="mt-1 text-xs text-gray-400">{zerados.length ? `${zerados.length} item(ns) zerado(s).` : 'Nenhum material/ferramenta zerado.'}</p></div><div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3"><p className="text-sm font-semibold">Estoque Acabando</p><p className="mt-1 text-xs text-gray-400">{baixos.length ? `${baixos.length} item(ns) abaixo do mínimo.` : 'Nenhum material/ferramenta acabando.'}</p></div><div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-3"><p className="text-sm font-semibold">Valor total do estoque</p><p className="mt-2 text-xl font-bold text-emerald-300">{valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</p></div></div> })()}
                           <input aria-label="Buscar no estoque" className="mt-3 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Buscar por código ou nome..." />
                           <p className="py-8 text-center text-sm text-gray-400">Nenhum material/ferramenta cadastrado nessa obra.</p>
                         </div>
