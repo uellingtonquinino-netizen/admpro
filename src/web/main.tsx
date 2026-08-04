@@ -30,8 +30,8 @@ type Colaborador = { id: number; nome: string; funcao: string | null; setor: str
 type Produto = { id: number; codigo: string; nome: string; unidade: string | null; estoque_atual: number; estoque_minimo: number; valor_unitario: number }
 type EntradaAlmoxarifado = { id: number; data: string; numero_nota: string | null; fornecedor_nome: string; valor_total: number }
 type SaidaAlmoxarifado = { id: number; data: string; produto_nome: string; produto_codigo: string; quantidade: number; retirado_por_nome: string; setor: string | null }
-type AutorizacaoWeb = { id: number; beneficiario_nome: string; descricao: string | null; valor: number; vencimento: string | null; aprovado_por: string | null; lote_id: number | null }
-type NotaFiscalWeb = { id: number; fornecedor_nome: string; numero_nf: string | null; data: string; valor_total: number; aprovado_por: string | null; lote_id: number | null }
+type AutorizacaoWeb = { id: number; beneficiario_tipo: string; beneficiario_id: number; beneficiario_nome: string; descricao: string | null; valor: number; vencimento: string | null; aprovado_por: string | null; lote_id: number | null }
+type NotaFiscalWeb = { id: number; fornecedor_id: number | null; fornecedor_nome: string; numero_nf: string | null; data: string; valor_total: number; aprovado_por: string | null; lote_id: number | null }
 type AnexoFinanceiro = { id: number; caminho: string; categoria?: string; ordem: number }
 type FornecedorWeb = { id: number; nome: string; tipo_pessoa: string; cnpj: string | null; cpf: string | null; email: string | null; telefone: string | null; categoria: string | null; forma_pagamento: string }
 type LoteWeb = { id: number; numero: number | null; titulo: string; criado_por: string | null; created_at: string; enviado_em: string | null }
@@ -126,11 +126,14 @@ function PortalWeb() {
   const [salvandoFornecedor, setSalvandoFornecedor] = useState(false)
   const [formFornecedor, setFormFornecedor] = useState({ nome: '', tipo_pessoa: 'pj', cnpj: '', cpf: '', email: '', telefone: '', categoria: '', forma_pagamento: 'boleto' })
   const [novaAp, setNovaAp] = useState(false)
+  const [editandoApId, setEditandoApId] = useState<number | null>(null)
   const [salvandoAp, setSalvandoAp] = useState(false)
   const [formAp, setFormAp] = useState({ fornecedor_id: '', descricao: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), observacoes: '' })
   const [novaNf, setNovaNf] = useState(false)
+  const [editandoNfId, setEditandoNfId] = useState<number | null>(null)
   const [salvandoNf, setSalvandoNf] = useState(false)
   const [formNf, setFormNf] = useState({ fornecedor_id: '', numero_nf: '', numero_pedido: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), data: new Date().toISOString().slice(0, 10) })
+  const [editandoFornecedorId, setEditandoFornecedorId] = useState<number | null>(null)
   const [itensLoteSelecionados, setItensLoteSelecionados] = useState<Set<string>>(new Set())
   const [processandoLote, setProcessandoLote] = useState(false)
   const [buscaProduto, setBuscaProduto] = useState('')
@@ -228,8 +231,8 @@ function PortalWeb() {
             ...(autorizacoes ?? []).filter(item => item.lote_id !== null && item.aprovado_supervisor_por === null).map(item => ({ id: item.id, tipo: 'ap' as const, empresa_id: item.empresa_id, nome: item.beneficiario_nome, referencia: 'Autorização de pagamento', valor: item.valor })),
             ...(notas ?? []).filter(item => item.lote_id !== null && item.aprovado_supervisor_por === null).map(item => ({ id: item.id, tipo: 'nf' as const, empresa_id: item.empresa_id, nome: item.fornecedor_nome, referencia: `Nota fiscal ${item.numero_nf ?? '—'}`, valor: null })),
           ])
-          setAutorizacoesWeb((autorizacoes ?? []).map(item => ({ id: item.id, beneficiario_nome: item.beneficiario_nome, descricao: null, valor: Number(item.valor), vencimento: null, aprovado_por: item.aprovado_supervisor_por, lote_id: item.lote_id })))
-          setNotasFiscaisWeb((notas ?? []).map(item => ({ id: item.id, fornecedor_nome: item.fornecedor_nome, numero_nf: item.numero_nf, data: '', valor_total: 0, aprovado_por: item.aprovado_supervisor_por, lote_id: item.lote_id })))
+          setAutorizacoesWeb((autorizacoes ?? []).map(item => ({ id: item.id, beneficiario_tipo: 'fornecedor', beneficiario_id: 0, beneficiario_nome: item.beneficiario_nome, descricao: null, valor: Number(item.valor), vencimento: null, aprovado_por: item.aprovado_supervisor_por, lote_id: item.lote_id })))
+          setNotasFiscaisWeb((notas ?? []).map(item => ({ id: item.id, fornecedor_id: null, fornecedor_nome: item.fornecedor_nome, numero_nf: item.numero_nf, data: '', valor_total: 0, aprovado_por: item.aprovado_supervisor_por, lote_id: item.lote_id })))
         }
         setCarregando(false)
         return
@@ -284,8 +287,8 @@ function PortalWeb() {
             ...(autorizacoes ?? []).filter(item => item.lote_id !== null && item.aprovado_supervisor_por !== null && item.aprovado_central_por === null).map(item => ({ id: item.id, tipo: 'ap' as const, empresa_id: item.empresa_id, nome: item.beneficiario_nome, referencia: 'Autorização de pagamento', valor: item.valor })),
             ...(notas ?? []).filter(item => item.lote_id !== null && item.aprovado_supervisor_por !== null && item.aprovado_central_por === null).map(item => ({ id: item.id, tipo: 'nf' as const, empresa_id: item.empresa_id, nome: item.fornecedor_nome, referencia: `Nota fiscal ${item.numero_nf ?? '—'}`, valor: null })),
           ])
-          setAutorizacoesWeb((autorizacoes ?? []).map(item => ({ id: item.id, beneficiario_nome: item.beneficiario_nome, descricao: null, valor: Number(item.valor), vencimento: null, aprovado_por: item.aprovado_central_por, lote_id: item.lote_id })))
-          setNotasFiscaisWeb((notas ?? []).map(item => ({ id: item.id, fornecedor_nome: item.fornecedor_nome, numero_nf: item.numero_nf, data: '', valor_total: 0, aprovado_por: item.aprovado_central_por, lote_id: item.lote_id })))
+          setAutorizacoesWeb((autorizacoes ?? []).map(item => ({ id: item.id, beneficiario_tipo: 'fornecedor', beneficiario_id: 0, beneficiario_nome: item.beneficiario_nome, descricao: null, valor: Number(item.valor), vencimento: null, aprovado_por: item.aprovado_central_por, lote_id: item.lote_id })))
+          setNotasFiscaisWeb((notas ?? []).map(item => ({ id: item.id, fornecedor_id: null, fornecedor_nome: item.fornecedor_nome, numero_nf: item.numero_nf, data: '', valor_total: 0, aprovado_por: item.aprovado_central_por, lote_id: item.lote_id })))
         }
         setCarregando(false)
         return
@@ -340,8 +343,8 @@ function PortalWeb() {
         if (erroEntradas || erroSaidas) setErro('Não foi possível carregar as movimentações do almoxarifado.')
         else { setEntradasWeb(entradas ?? []); setSaidasWeb(saidas ?? []) }
         const [{ data: autorizacoes, error: erroAutorizacoes }, { data: notasFiscais, error: erroNotasFiscais }] = await Promise.all([
-          supabase.from('autorizacoes_pagamento').select('id,beneficiario_nome,descricao,valor,vencimento,aprovado_por,lote_id').eq('empresa_id', data.empresa_id).order('created_at', { ascending: false }).limit(100),
-          supabase.from('notas_fiscais').select('id,fornecedor_nome,numero_nf,data,valor_total,aprovado_por,lote_id').eq('empresa_id', data.empresa_id).order('created_at', { ascending: false }).limit(100),
+          supabase.from('autorizacoes_pagamento').select('id,beneficiario_tipo,beneficiario_id,beneficiario_nome,descricao,valor,vencimento,aprovado_por,lote_id').eq('empresa_id', data.empresa_id).order('created_at', { ascending: false }).limit(100),
+          supabase.from('notas_fiscais').select('id,fornecedor_id,fornecedor_nome,numero_nf,data,valor_total,aprovado_por,lote_id').eq('empresa_id', data.empresa_id).order('created_at', { ascending: false }).limit(100),
         ])
         if (erroAutorizacoes || erroNotasFiscais) setErro('Não foi possível carregar as autorizações e notas fiscais.')
         else { setAutorizacoesWeb(autorizacoes ?? []); setNotasFiscaisWeb(notasFiscais ?? []) }
@@ -410,17 +413,21 @@ function PortalWeb() {
     evento.preventDefault()
     if (!perfil) return
     setErro(''); setSalvandoFornecedor(true)
-    const { error } = await supabase.from('fornecedores').insert({
+    const dadosFornecedor = {
       empresa_id: perfil.empresa_id, nome: formFornecedor.nome.trim(), tipo_pessoa: formFornecedor.tipo_pessoa,
       cnpj: formFornecedor.tipo_pessoa === 'pj' ? formFornecedor.cnpj.trim() || null : null,
       cpf: formFornecedor.tipo_pessoa === 'pf' ? formFornecedor.cpf.trim() || null : null,
       email: formFornecedor.email.trim() || null, telefone: formFornecedor.telefone.trim() || null,
       categoria: formFornecedor.categoria.trim() || null, forma_pagamento: formFornecedor.forma_pagamento,
       ativo: 1,
-    })
+    }
+    const { error } = editandoFornecedorId
+      ? await supabase.from('fornecedores').update(dadosFornecedor).eq('id', editandoFornecedorId)
+      : await supabase.from('fornecedores').insert(dadosFornecedor)
     setSalvandoFornecedor(false)
     if (error) { setErro(`Não foi possível cadastrar o fornecedor: ${error.message}`); return }
     setNovoFornecedor(false)
+    setEditandoFornecedorId(null)
     setFormFornecedor({ nome: '', tipo_pessoa: 'pj', cnpj: '', cpf: '', email: '', telefone: '', categoria: '', forma_pagamento: 'boleto' })
     await carregarPerfil(session)
   }
@@ -431,14 +438,17 @@ function PortalWeb() {
     const fornecedor = fornecedoresWeb.find(item => item.id === Number(formAp.fornecedor_id))
     if (!fornecedor) { setErro('Selecione o fornecedor da autorização.'); return }
     setErro(''); setSalvandoAp(true)
-    const { error } = await supabase.rpc('criar_ap', { p: {
+    const dadosAp = {
       empresa_id: perfil.empresa_id, beneficiario_tipo: 'fornecedor', beneficiario_id: fornecedor.id,
       beneficiario_nome: fornecedor.nome, descricao: formAp.descricao.trim(), observacoes: formAp.observacoes.trim(),
       boletos: [{ valor: Number(formAp.valor), vencimento: formAp.vencimento }], solicitante: perfil.nome, autorizado_por: perfil.nome,
-    } })
+    }
+    const { error } = editandoApId
+      ? await supabase.rpc('atualizar_ap', { p: { ...dadosAp, id: editandoApId } })
+      : await supabase.rpc('criar_ap', { p: dadosAp })
     setSalvandoAp(false)
     if (error) { setErro(`Não foi possível criar a autorização: ${error.message}`); return }
-    setNovaAp(false); setFormAp({ fornecedor_id: '', descricao: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), observacoes: '' })
+    setNovaAp(false); setEditandoApId(null); setFormAp({ fornecedor_id: '', descricao: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), observacoes: '' })
     await carregarPerfil(session)
   }
 
@@ -448,14 +458,17 @@ function PortalWeb() {
     const fornecedor = fornecedoresWeb.find(item => item.id === Number(formNf.fornecedor_id))
     if (!fornecedor) { setErro('Selecione o fornecedor da nota fiscal.'); return }
     setErro(''); setSalvandoNf(true)
-    const { error } = await supabase.rpc('criar_nota_fiscal', { p: {
+    const dadosNf = {
       empresa_id: perfil.empresa_id, fornecedor_id: fornecedor.id, fornecedor_nome: fornecedor.nome,
       numero_nf: formNf.numero_nf.trim(), numero_pedido: formNf.numero_pedido.trim(), data: formNf.data,
       data_emissao_nf: formNf.data, boletos: [{ valor: Number(formNf.valor), vencimento: formNf.vencimento }],
-    } })
+    }
+    const { error } = editandoNfId
+      ? await supabase.rpc('atualizar_nota_fiscal', { p: { ...dadosNf, id: editandoNfId } })
+      : await supabase.rpc('criar_nota_fiscal', { p: dadosNf })
     setSalvandoNf(false)
     if (error) { setErro(`Não foi possível criar a nota fiscal: ${error.message}`); return }
-    setNovaNf(false); setFormNf({ fornecedor_id: '', numero_nf: '', numero_pedido: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), data: new Date().toISOString().slice(0, 10) })
+    setNovaNf(false); setEditandoNfId(null); setFormNf({ fornecedor_id: '', numero_nf: '', numero_pedido: '', valor: '', vencimento: new Date().toISOString().slice(0, 10), data: new Date().toISOString().slice(0, 10) })
     await carregarPerfil(session)
   }
 
@@ -818,6 +831,9 @@ function PortalWeb() {
       {pagina === 'fornecedores' && <section className="mx-auto max-w-[1180px] py-2 md:py-4"><div className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm font-semibold text-brand-400">FINANCEIRO</p><h2 className="mt-1 text-2xl font-bold">Fornecedores</h2><p className="mt-1 text-sm text-gray-400">Cadastros usados nas autorizações, notas fiscais e entradas.</p></div><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium" onClick={() => setNovoFornecedor(aberto => !aberto)}>{novoFornecedor ? 'Cancelar' : '+ Novo fornecedor'}</button></div>{novoFornecedor && <form onSubmit={salvarFornecedor} className="mb-5 grid gap-3 rounded-xl border border-surface-border bg-surface p-4 md:grid-cols-2"><label className="text-sm text-gray-300 md:col-span-2">Nome/Razão social<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.nome} onChange={e => setFormFornecedor({ ...formFornecedor, nome: e.target.value })} required /></label><label className="text-sm text-gray-300">Tipo<select className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.tipo_pessoa} onChange={e => setFormFornecedor({ ...formFornecedor, tipo_pessoa: e.target.value })}><option value="pj">Pessoa jurídica</option><option value="pf">Pessoa física</option></select></label><label className="text-sm text-gray-300">{formFornecedor.tipo_pessoa === 'pj' ? 'CNPJ' : 'CPF'}<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.tipo_pessoa === 'pj' ? formFornecedor.cnpj : formFornecedor.cpf} onChange={e => setFormFornecedor(formFornecedor.tipo_pessoa === 'pj' ? { ...formFornecedor, cnpj: e.target.value } : { ...formFornecedor, cpf: e.target.value })} /></label><label className="text-sm text-gray-300">E-mail<input type="email" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.email} onChange={e => setFormFornecedor({ ...formFornecedor, email: e.target.value })} /></label><label className="text-sm text-gray-300">Telefone<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.telefone} onChange={e => setFormFornecedor({ ...formFornecedor, telefone: e.target.value })} /></label><label className="text-sm text-gray-300">Categoria<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.categoria} onChange={e => setFormFornecedor({ ...formFornecedor, categoria: e.target.value })} /></label><label className="text-sm text-gray-300">Forma de pagamento<select className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formFornecedor.forma_pagamento} onChange={e => setFormFornecedor({ ...formFornecedor, forma_pagamento: e.target.value })}><option value="boleto">Boleto</option><option value="conta">Conta / PIX</option></select></label><div className="md:col-span-2"><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={salvandoFornecedor}>{salvandoFornecedor ? 'Salvando…' : 'Cadastrar fornecedor'}</button></div></form>}<div className="overflow-x-auto rounded-xl border border-surface-border bg-surface"><table className="w-full min-w-[640px] text-left text-sm"><thead className="bg-surface-card text-gray-400"><tr><th className="p-3">Nome</th><th className="p-3">Documento</th><th className="p-3">Contato</th><th className="p-3">Categoria</th></tr></thead><tbody>{fornecedoresWeb.length === 0 ? <tr><td colSpan={4} className="p-6 text-gray-400">Nenhum fornecedor cadastrado.</td></tr> : fornecedoresWeb.map(item => <tr key={item.id} className="border-t border-surface-border"><td className="p-3 font-medium">{item.nome}</td><td className="p-3 text-gray-300">{item.cnpj ?? item.cpf ?? '—'}</td><td className="p-3 text-gray-300">{item.email ?? item.telefone ?? '—'}</td><td className="p-3 text-gray-400">{item.categoria ?? '—'}</td></tr>)}</tbody></table></div></section>}
       {pagina === 'lotes' && <section className="mx-auto max-w-[1180px] py-2 md:py-4"><div className="mb-6"><p className="text-sm font-semibold text-brand-400">FINANCEIRO</p><h2 className="mt-1 text-2xl font-bold">Lotes financeiros</h2><p className="mt-1 text-sm text-gray-400">Agrupe itens autorizados e envie-os para a aprovação do Supervisor.</p></div><div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(360px,1fr)]"><section className="rounded-xl border border-surface-border bg-surface p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">Itens disponíveis</h3><p className="mt-1 text-sm text-gray-400">Apenas APs e NFs autorizadas que ainda não estão em lote.</p></div><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={processandoLote || itensLoteSelecionados.size === 0} onClick={() => void criarLoteFinanceiro()}>{processandoLote ? 'Criando…' : `Criar lote (${itensLoteSelecionados.size})`}</button></div><div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">{[...autorizacoesWeb.filter(item => !!item.aprovado_por && item.lote_id === null).map(item => ({ chave: `ap-${item.id}`, tipo: 'AP', nome: item.beneficiario_nome, detalhe: item.descricao ?? 'Autorização de pagamento', valor: item.valor })), ...notasFiscaisWeb.filter(item => !!item.aprovado_por && item.lote_id === null).map(item => ({ chave: `nf-${item.id}`, tipo: 'NF', nome: item.fornecedor_nome, detalhe: `NF ${item.numero_nf ?? '—'}`, valor: item.valor_total }))].map(item => <label key={item.chave} className="flex cursor-pointer items-center gap-3 p-3 hover:bg-surface-hover"><input type="checkbox" className="h-4 w-4 accent-blue-600" checked={itensLoteSelecionados.has(item.chave)} onChange={() => alternarItemLote(item.chave)} /><span className="min-w-0 flex-1"><span className="mr-2 rounded bg-brand-500/15 px-1.5 py-0.5 text-[10px] font-bold text-brand-300">{item.tipo}</span><strong className="text-sm">{item.nome}</strong><span className="block truncate text-xs text-gray-400">{item.detalhe}</span></span><span className="shrink-0 text-sm text-amber-300">{Number(item.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span></label>)}{autorizacoesWeb.filter(item => !!item.aprovado_por && item.lote_id === null).length + notasFiscaisWeb.filter(item => !!item.aprovado_por && item.lote_id === null).length === 0 && <p className="p-5 text-sm text-gray-400">Não há itens autorizados disponíveis para lote.</p>}</div></section><section className="rounded-xl border border-surface-border bg-surface p-4"><h3 className="font-semibold">Lotes criados</h3><p className="mt-1 text-sm text-gray-400">Envie os lotes abertos ao Supervisor.</p><div className="mt-4 divide-y divide-surface-border">{lotesWeb.length === 0 ? <p className="py-5 text-sm text-gray-400">Nenhum lote criado.</p> : lotesWeb.map(lote => <article key={lote.id} className="py-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="font-medium">{lote.titulo}</p><p className="mt-1 text-xs text-gray-400">{lote.enviado_em ? `Enviado em ${lote.enviado_em.slice(0, 10)}` : 'Aguardando envio'} </p></div>{lote.enviado_em ? <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-300">Enviado</span> : <button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={processandoLote} onClick={() => void enviarLoteFinanceiro(lote.id)}>{processandoLote ? 'Enviando…' : 'Enviar ao Supervisor'}</button>}</div></article>)}</div></section></div></section>}
       {perfil.perfil === 'supervisor' && pagina === 'supervisor' && <section className="mx-auto max-w-7xl pb-7"><div className="rounded-xl border border-surface-border bg-surface p-4"><div><h3 className="font-semibold">Assinatura do Supervisor</h3><p className="mt-1 text-sm text-gray-400">Esta assinatura identifica suas aprovações; a data, hora e usuário ficam registrados no Supabase.</p></div><div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center"><div className="grid h-24 w-48 place-items-center rounded-lg border border-dashed border-surface-border bg-surface-card">{carimboUrl ? <img src={carimboUrl} alt="Assinatura cadastrada" className="h-full w-full object-contain p-2" /> : <span className="text-xs text-gray-500">Nenhuma assinatura cadastrada</span>}</div><div><input className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" type="file" accept="image/*" onChange={e => selecionarCarimbo(e.target.files?.[0])} /><div className="mt-3 flex gap-2"><button className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={salvandoCarimbo} onClick={() => void salvarCarimbo()}>{salvandoCarimbo ? 'Salvando…' : 'Salvar assinatura'}</button>{carimboUrl && <button className="rounded-lg border border-surface-border px-4 py-2.5 text-sm text-gray-200" onClick={() => setCarimboUrl('')}>Remover</button>}</div></div></div></div></section>}
+      {pagina === 'ap' && perfil.perfil === 'admin' && <section className="mx-auto max-w-[1180px] pb-7"><div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface p-4"><span className="text-sm text-gray-300">Editar autorização existente</span><select className="min-w-60 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" defaultValue="" onChange={e => { const item = autorizacoesWeb.find(ap => ap.id === Number(e.target.value)); if (!item) return; setEditandoApId(item.id); setFormAp({ fornecedor_id: String(item.beneficiario_id), descricao: item.descricao ?? '', valor: String(item.valor), vencimento: item.vencimento ?? new Date().toISOString().slice(0, 10), observacoes: '' }); setNovaAp(true) }}><option value="">Selecione uma AP</option>{autorizacoesWeb.filter(item => item.lote_id === null).map(item => <option key={item.id} value={item.id}>{item.beneficiario_nome} — {Number(item.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</option>)}</select></div></section>}
+      {pagina === 'notas' && perfil.perfil === 'admin' && <section className="mx-auto max-w-[1180px] pb-7"><div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface p-4"><span className="text-sm text-gray-300">Editar nota fiscal existente</span><select className="min-w-60 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" defaultValue="" onChange={e => { const item = notasFiscaisWeb.find(nota => nota.id === Number(e.target.value)); if (!item) return; setEditandoNfId(item.id); setFormNf({ fornecedor_id: item.fornecedor_id ? String(item.fornecedor_id) : '', numero_nf: item.numero_nf ?? '', numero_pedido: '', valor: String(item.valor_total), vencimento: item.data || new Date().toISOString().slice(0, 10), data: item.data || new Date().toISOString().slice(0, 10) }); setNovaNf(true) }}><option value="">Selecione uma NF</option>{notasFiscaisWeb.filter(item => item.lote_id === null).map(item => <option key={item.id} value={item.id}>{item.fornecedor_nome} — NF {item.numero_nf ?? '—'}</option>)}</select></div></section>}
+      {pagina === 'fornecedores' && <section className="mx-auto max-w-[1180px] pb-7"><div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface p-4"><span className="text-sm text-gray-300">Editar fornecedor</span><select className="min-w-60 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" defaultValue="" onChange={e => { const item = fornecedoresWeb.find(fornecedor => fornecedor.id === Number(e.target.value)); if (!item) return; setEditandoFornecedorId(item.id); setFormFornecedor({ nome: item.nome, tipo_pessoa: item.tipo_pessoa, cnpj: item.cnpj ?? '', cpf: item.cpf ?? '', email: item.email ?? '', telefone: item.telefone ?? '', categoria: item.categoria ?? '', forma_pagamento: item.forma_pagamento }); setNovoFornecedor(true) }}><option value="">Selecione um fornecedor</option>{fornecedoresWeb.map(item => <option key={item.id} value={item.id}>{item.nome}</option>)}</select></div></section>}
     </main></div>
   </div>
 }
