@@ -2477,6 +2477,38 @@ function PortalWeb() {
     janela.print();
   }
 
+  function exportarColaboradores() {
+    const linhas = [
+      "Nome;Função;Setor;Situação;Data de admissão;Salário base",
+      ...colaboradoresFiltrados.map(
+        (item) =>
+          `${item.nome};${item.funcao ?? ""};${item.setor ?? ""};${item.status};${item.data_admissao ?? ""};${Number(item.salario_base).toFixed(2)}`,
+      ),
+    ];
+    const url = URL.createObjectURL(
+      new Blob([linhas.join("\n")], { type: "text/csv;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "colaboradores.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function imprimirRelatorioColaboradores() {
+    const janela = window.open("", "_blank", "noopener");
+    if (!janela) {
+      setErro("Permita pop-ups para imprimir o relatório.");
+      return;
+    }
+    janela.document.write(
+      `<html><head><title>Relatório de colaboradores</title><style>body{font-family:Arial;padding:32px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #bbb;padding:8px;text-align:left}</style></head><body><h1>Relatório de colaboradores</h1><p>${colaboradoresFiltrados.length} registro(s)</p><table><thead><tr><th>Nome</th><th>Função</th><th>Setor</th><th>Situação</th><th>Salário base</th></tr></thead><tbody>${colaboradoresFiltrados.map((item) => `<tr><td>${item.nome}</td><td>${item.funcao ?? "—"}</td><td>${item.setor ?? "—"}</td><td>${item.status}</td><td>${Number(item.salario_base).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>`).join("")}</tbody></table></body></html>`,
+    );
+    janela.document.close();
+    janela.focus();
+    janela.print();
+  }
+
   async function assinarPdfNoStorage(caminho: string) {
     if (!perfil || !carimboUrl) {
       setErro("Cadastre sua assinatura antes de assinar o PDF.");
@@ -5111,6 +5143,20 @@ function PortalWeb() {
                     <span className="rounded-full bg-brand-500/10 px-3 py-1.5 text-xs font-medium text-brand-300">
                       {colaboradoresWeb.length} cadastrados
                     </span>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-surface-border px-3 py-2 text-xs hover:bg-surface-hover"
+                      onClick={imprimirRelatorioColaboradores}
+                    >
+                      Imprimir
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-surface-border px-3 py-2 text-xs hover:bg-surface-hover"
+                      onClick={exportarColaboradores}
+                    >
+                      Exportar CSV
+                    </button>
                     {perfil.perfil === "admin" && (
                       <button
                         className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium hover:bg-brand-500"
