@@ -88,6 +88,7 @@ type Colaborador = {
   setor: string | null;
   status: string;
   salario_base: number;
+  data_admissao?: string | null;
 };
 type Produto = {
   id: number;
@@ -674,12 +675,19 @@ function PortalWeb() {
   });
   const [novoColaborador, setNovoColaborador] = useState(false);
   const [salvandoColaborador, setSalvandoColaborador] = useState(false);
+  const [editandoColaboradorId, setEditandoColaboradorId] = useState<
+    number | null
+  >(null);
+  const [excluindoColaboradorId, setExcluindoColaboradorId] = useState<
+    number | null
+  >(null);
   const [formColaborador, setFormColaborador] = useState({
     nome: "",
     funcao: "",
     setor: "",
     data_admissao: new Date().toISOString().slice(0, 10),
     salario_base: "",
+    status: "ativo",
   });
   const [novoUsuarioMaster, setNovoUsuarioMaster] = useState(false);
   const [salvandoUsuarioMaster, setSalvandoUsuarioMaster] = useState(false);
@@ -1259,7 +1267,7 @@ function PortalWeb() {
         const { data: listaColaboradores, error: erroColaboradores } =
           await supabase
             .from("colaboradores")
-            .select("id,nome,funcao,setor,status,salario_base")
+            .select("id,nome,funcao,setor,status,salario_base,data_admissao")
             .eq("empresa_id", data.empresa_id)
             .order("nome")
             .limit(200);
@@ -1811,7 +1819,7 @@ function PortalWeb() {
     if (!perfil) return;
     setErro("");
     setSalvandoColaborador(true);
-    const { error } = await supabase.from("colaboradores").insert({
+    const dadosColaborador = {
       empresa_id: perfil.empresa_id,
       nome: formColaborador.nome.trim(),
       funcao: formColaborador.funcao.trim() || null,
@@ -1820,24 +1828,65 @@ function PortalWeb() {
       salario_base: formColaborador.salario_base
         ? Number(formColaborador.salario_base)
         : null,
-      status: "ativo",
+      status: formColaborador.status,
+    };
+    const dadosNovoColaborador = {
+      ...dadosColaborador,
       pcd: 0,
       alojado: 0,
       tem_baixada: 0,
-    });
+    };
+    const { error } = editandoColaboradorId
+      ? await supabase
+          .from("colaboradores")
+          .update(dadosColaborador)
+          .eq("id", editandoColaboradorId)
+      : await supabase.from("colaboradores").insert(dadosNovoColaborador);
     setSalvandoColaborador(false);
     if (error) {
       setErro(`Não foi possível cadastrar o colaborador: ${error.message}`);
       return;
     }
     setNovoColaborador(false);
+    setEditandoColaboradorId(null);
     setFormColaborador({
       nome: "",
       funcao: "",
       setor: "",
       data_admissao: new Date().toISOString().slice(0, 10),
       salario_base: "",
+      status: "ativo",
     });
+    await carregarPerfil(session);
+  }
+
+  function editarColaborador(item: Colaborador) {
+    setEditandoColaboradorId(item.id);
+    setFormColaborador({
+      nome: item.nome,
+      funcao: item.funcao ?? "",
+      setor: item.setor ?? "",
+      data_admissao: item.data_admissao ?? "",
+      salario_base: String(item.salario_base ?? ""),
+      status: item.status,
+    });
+    setNovoColaborador(true);
+  }
+
+  async function excluirColaborador(item: Colaborador) {
+    if (!session || !window.confirm(`Excluir o colaborador “${item.nome}”?`))
+      return;
+    setErro("");
+    setExcluindoColaboradorId(item.id);
+    const { error } = await supabase
+      .from("colaboradores")
+      .delete()
+      .eq("id", item.id);
+    setExcluindoColaboradorId(null);
+    if (error) {
+      setErro(`Não foi possível excluir o colaborador: ${error.message}`);
+      return;
+    }
     await carregarPerfil(session);
   }
 
@@ -4873,7 +4922,10 @@ function PortalWeb() {
                     <tbody>
                       {lancamentosFiltrados.length === 0 ? (
                         <tr>
-                          <td className="p-5 text-gray-400" colSpan={5}>
+                          <td
+                            className="p-5 text-gray-400"
+                            colSpan={perfil.perfil === "admin" ? 6 : 5}
+                          >
                             Nenhum lançamento encontrado.
                           </td>
                         </tr>
@@ -4955,7 +5007,10 @@ function PortalWeb() {
                     {perfil.perfil === "admin" && (
                       <button
                         className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium hover:bg-brand-500"
-                        onClick={() => setNovoColaborador((aberto) => !aberto)}
+                        onClick={() => {
+                          setEditandoColaboradorId(null);
+                          setNovoColaborador((aberto) => !aberto);
+                        }}
                       >
                         {novoColaborador ? "Cancelar" : "+ Novo colaborador"}
                       </button>
@@ -5083,6 +5138,24 @@ function PortalWeb() {
                         }
                       />
                     </label>
+                    <label className="text-sm text-gray-300">
+                      Situação
+                      <select
+                        className="mt-1 w-full rounded-md border border-surface-border bg-surface-card px-3 py-2 text-white"
+                        value={formColaborador.status}
+                        onChange={(e) =>
+                          setFormColaborador({
+                            ...formColaborador,
+                            status: e.target.value,
+                          })
+                        }
+                      >
+                        <option value="ativo">Ativo</option>
+                        <option value="ferias">Férias</option>
+                        <option value="afastado">Afastado</option>
+                        <option value="desligado">Desligado</option>
+                      </select>
+                    </label>
                     <div className="md:col-span-2">
                       <button
                         className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60"
@@ -5090,7 +5163,9 @@ function PortalWeb() {
                       >
                         {salvandoColaborador
                           ? "Salvando…"
-                          : "Cadastrar colaborador"}
+                          : editandoColaboradorId
+                            ? "Salvar alterações"
+                            : "Cadastrar colaborador"}
                       </button>
                     </div>
                   </form>
@@ -5144,6 +5219,27 @@ function PortalWeb() {
                             </p>
                           </div>
                         </div>
+                        {perfil.perfil === "admin" && (
+                          <div className="mt-4 flex gap-2 border-t border-surface-border pt-3">
+                            <button
+                              type="button"
+                              className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-brand-300"
+                              onClick={() => editarColaborador(item)}
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-md border border-red-500/30 px-3 py-1.5 text-xs text-red-300 disabled:opacity-60"
+                              disabled={excluindoColaboradorId === item.id}
+                              onClick={() => void excluirColaborador(item)}
+                            >
+                              {excluindoColaboradorId === item.id
+                                ? "Excluindo…"
+                                : "Excluir"}
+                            </button>
+                          </div>
+                        )}
                       </article>
                     ))
                   )}
@@ -5157,12 +5253,16 @@ function PortalWeb() {
                         <th className="p-3">Setor</th>
                         <th className="p-3">Status</th>
                         <th className="p-3 text-right">Salário base</th>
+                        {perfil.perfil === "admin" && <th className="p-3" />}
                       </tr>
                     </thead>
                     <tbody>
                       {colaboradoresFiltrados.length === 0 ? (
                         <tr>
-                          <td className="p-5 text-gray-400" colSpan={5}>
+                          <td
+                            className="p-5 text-gray-400"
+                            colSpan={perfil.perfil === "admin" ? 6 : 5}
+                          >
                             Nenhum colaborador encontrado.
                           </td>
                         </tr>
@@ -5196,6 +5296,29 @@ function PortalWeb() {
                                 { style: "currency", currency: "BRL" },
                               )}
                             </td>
+                            {perfil.perfil === "admin" && (
+                              <td className="p-3">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    className="text-xs text-brand-300"
+                                    onClick={() => editarColaborador(item)}
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="text-xs text-red-300 disabled:opacity-60"
+                                    disabled={excluindoColaboradorId === item.id}
+                                    onClick={() => void excluirColaborador(item)}
+                                  >
+                                    {excluindoColaboradorId === item.id
+                                      ? "Excluindo…"
+                                      : "Excluir"}
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         ))
                       )}
