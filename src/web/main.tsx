@@ -5399,7 +5399,68 @@ function PortalWeb() {
                   Revise e autorize os pagamentos da obra.
                 </p>
               </div>
-              <div className="overflow-x-auto rounded-xl border border-surface-border bg-surface">
+              <div className="space-y-3 md:hidden">
+                {autorizacoesWeb.length === 0 ? (
+                  <p className="rounded-xl border border-surface-border bg-surface p-5 text-sm text-gray-400">
+                    Nenhuma autorização encontrada.
+                  </p>
+                ) : (
+                  autorizacoesWeb.map((item) => (
+                    <article
+                      key={item.id}
+                      className="rounded-xl border border-surface-border bg-surface p-4"
+                    >
+                      <p className="font-semibold">{item.beneficiario_nome}</p>
+                      <p className="mt-1 text-sm text-gray-400">
+                        {item.descricao ?? "—"}
+                      </p>
+                      <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+                        <span className="text-gray-400">
+                          {item.vencimento ?? "Sem vencimento"}
+                        </span>
+                        <strong className="text-amber-300">
+                          {Number(item.valor).toLocaleString("pt-BR", {
+                            style: "currency",
+                            currency: "BRL",
+                          })}
+                        </strong>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button
+                          className="rounded-lg border border-surface-border px-3 py-2 text-xs"
+                          onClick={() => {
+                            setDocumentoFinanceiroTipo("ap");
+                            setDocumentoFinanceiroId(String(item.id));
+                            void carregarAnexosFinanceiros("ap", String(item.id));
+                          }}
+                        >
+                          Documentos
+                        </button>
+                        {item.aprovado_por ? (
+                          <span className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs text-emerald-300">
+                            Autorizada
+                          </span>
+                        ) : (
+                          <button
+                            className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60"
+                            disabled={
+                              itemFinanceiroProcessando === `ap-${item.id}`
+                            }
+                            onClick={() =>
+                              void aprovarItemFinanceiro("ap", item.id)
+                            }
+                          >
+                            {itemFinanceiroProcessando === `ap-${item.id}`
+                              ? "Autorizando…"
+                              : "Autorizar"}
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+              <div className="hidden overflow-x-auto rounded-xl border border-surface-border bg-surface md:block">
                 <table className="w-full min-w-[680px] text-left text-sm">
                   <thead className="bg-surface-card text-gray-400">
                     <tr>
@@ -5490,7 +5551,63 @@ function PortalWeb() {
                   Revise e autorize as notas fiscais da obra.
                 </p>
               </div>
-              <div className="overflow-x-auto rounded-xl border border-surface-border bg-surface">
+              <div className="space-y-3 md:hidden">
+                {notasFiscaisWeb.length === 0 ? (
+                  <p className="rounded-xl border border-surface-border bg-surface p-5 text-sm text-gray-400">
+                    Nenhuma nota fiscal encontrada.
+                  </p>
+                ) : (
+                  notasFiscaisWeb.map((item) => (
+                    <article
+                      key={item.id}
+                      className="rounded-xl border border-surface-border bg-surface p-4"
+                    >
+                      <p className="font-semibold">{item.fornecedor_nome}</p>
+                      <p className="mt-1 text-sm text-gray-400">
+                        NF {item.numero_nf ?? "—"} · {item.data}
+                      </p>
+                      <strong className="mt-3 block text-amber-300">
+                        {Number(item.valor_total).toLocaleString("pt-BR", {
+                          style: "currency",
+                          currency: "BRL",
+                        })}
+                      </strong>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <button
+                          className="rounded-lg border border-surface-border px-3 py-2 text-xs"
+                          onClick={() => {
+                            setDocumentoFinanceiroTipo("nf");
+                            setDocumentoFinanceiroId(String(item.id));
+                            void carregarAnexosFinanceiros("nf", String(item.id));
+                          }}
+                        >
+                          Documentos
+                        </button>
+                        {item.aprovado_por ? (
+                          <span className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs text-emerald-300">
+                            Autorizada
+                          </span>
+                        ) : (
+                          <button
+                            className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60"
+                            disabled={
+                              itemFinanceiroProcessando === `nf-${item.id}`
+                            }
+                            onClick={() =>
+                              void aprovarItemFinanceiro("nf", item.id)
+                            }
+                          >
+                            {itemFinanceiroProcessando === `nf-${item.id}`
+                              ? "Autorizando…"
+                              : "Autorizar"}
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+              <div className="hidden overflow-x-auto rounded-xl border border-surface-border bg-surface md:block">
                 <table className="w-full min-w-[680px] text-left text-sm">
                   <thead className="bg-surface-card text-gray-400">
                     <tr>
