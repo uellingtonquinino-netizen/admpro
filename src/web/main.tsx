@@ -31,6 +31,7 @@ type EntradaAlmoxarifado = { id: number; data: string; numero_nota: string | nul
 type SaidaAlmoxarifado = { id: number; data: string; produto_nome: string; produto_codigo: string; quantidade: number; retirado_por_nome: string; setor: string | null }
 type AutorizacaoWeb = { id: number; beneficiario_nome: string; descricao: string | null; valor: number; vencimento: string | null; aprovado_por: string | null; lote_id: number | null }
 type NotaFiscalWeb = { id: number; fornecedor_nome: string; numero_nf: string | null; data: string; valor_total: number; aprovado_por: string | null; lote_id: number | null }
+type AnexoFinanceiro = { id: number; caminho: string; categoria?: string; ordem: number }
 type ResumoMaster = { obras: number; usuarios: number; supervisores: number; administradores: number }
 type UsuarioMaster = { id: number; nome: string; email: string; perfil: string; ativo: boolean | number }
 type ObraMaster = { id: number; nome: string; titulo_obra: string | null; estado: string | null }
@@ -96,6 +97,12 @@ function PortalWeb() {
   const [itensSupervisorPendentes, setItensSupervisorPendentes] = useState<ItemCentral[]>([])
   const [itemCentralProcessando, setItemCentralProcessando] = useState<string | null>(null)
   const [itemFinanceiroProcessando, setItemFinanceiroProcessando] = useState<string | null>(null)
+  const [documentoFinanceiroTipo, setDocumentoFinanceiroTipo] = useState<'ap' | 'nf'>('ap')
+  const [documentoFinanceiroId, setDocumentoFinanceiroId] = useState('')
+  const [anexosFinanceiros, setAnexosFinanceiros] = useState<AnexoFinanceiro[]>([])
+  const [novosAnexosFinanceiros, setNovosAnexosFinanceiros] = useState<File[]>([])
+  const [carregandoAnexosFinanceiros, setCarregandoAnexosFinanceiros] = useState(false)
+  const [enviandoAnexosFinanceiros, setEnviandoAnexosFinanceiros] = useState(false)
   const [solicitacaoRespondendoId, setSolicitacaoRespondendoId] = useState<number | null>(null)
   const [respostaPessoal, setRespostaPessoal] = useState('')
   const [anexosResposta, setAnexosResposta] = useState<File[]>([])
@@ -508,6 +515,79 @@ function PortalWeb() {
     await carregarPerfil(session)
   }
 
+  function caminhoStorage(caminho: string) {
+    return caminho.startsWith('supabase://documentos-rh/') ? caminho.slice('supabase://documentos-rh/'.length) : caminho
+  }
+
+  async function carregarAnexosFinanceiros(tipo = documentoFinanceiroTipo, idTexto = documentoFinanceiroId) {
+    if (!idTexto) { setAnexosFinanceiros([]); return }
+    setCarregandoAnexosFinanceiros(true)
+    const resultado = tipo === 'ap'
+      ? await supabase.from('autorizacoes_pagamento_anexos').select('id,caminho,ordem').eq('ap_id', Number(idTexto)).order('ordem')
+      : await supabase.from('notas_fiscais_anexos').select('id,caminho,categoria,ordem').eq('nota_id', Number(idTexto)).order('ordem')
+    setCarregandoAnexosFinanceiros(false)
+    if (resultado.error) { setErro(`Não foi possível carregar os anexos: ${resultado.error.message}`); return }
+    setAnexosFinanceiros((resultado.data ?? []) as AnexoFinanceiro[])
+  }
+
+  async function enviarAnexosFinanceiros(evento: FormEvent) {
+    evento.preventDefault()
+    if (!perfil || !documentoFinanceiroId || novosAnexosFinanceiros.length === 0) { setErro('Selecione o documento e ao menos um arquivo.'); return }
+    if (!['admin', 'master'].includes(perfil.perfil)) { setErro('Seu perfil possui acesso apenas para consulta de anexos financeiros.'); return }
+    setErro(''); setEnviandoAnexosFinanceiros(true)
+    try {
+      for (const [ordem, arquivo] of novosAnexosFinanceiros.entries()) {
+        const nomeSeguro = arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        const caminho = `${perfil.empresa_id}/financeiro/${documentoFinanceiroTipo}/${documentoFinanceiroId}/${Date.now()}-${ordem}-${nomeSeguro}`
+        const { error: erroUpload } = await supabase.storage.from('documentos-rh').upload(caminho, arquivo)
+        if (erroUpload) throw erroUpload
+        const resultadoRegistro = documentoFinanceiroTipo === 'ap'
+          ? await supabase.from('autorizacoes_pagamento_anexos').insert({ ap_id: Number(documentoFinanceiroId), caminho: `supabase://documentos-rh/${caminho}`, ordem })
+          : await supabase.from('notas_fiscais_anexos').insert({ nota_id: Number(documentoFinanceiroId), caminho: `supabase://documentos-rh/${caminho}`, categoria: 'nota', ordem })
+        const erroRegistro = resultadoRegistro.error
+        if (erroRegistro) throw erroRegistro
+      }
+      setNovosAnexosFinanceiros([])
+      await carregarAnexosFinanceiros()
+    } catch (causa) {
+      setErro(`Não foi possível enviar os anexos: ${causa instanceof Error ? causa.message : 'erro desconhecido'}`)
+    } finally {
+      setEnviandoAnexosFinanceiros(false)
+    }
+  }
+
+  async function obterUrlArquivo(caminho: string) {
+    const { data, error } = await supabase.storage.from('documentos-rh').createSignedUrl(caminhoStorage(caminho), 60)
+    if (error || !data?.signedUrl) throw error ?? new Error('Não foi possível gerar o acesso temporário ao arquivo.')
+    return data.signedUrl
+  }
+
+  async function visualizarArquivo(caminho: string) {
+    try { window.open(await obterUrlArquivo(caminho), '_blank', 'noopener') }
+    catch (causa) { setErro(`Não foi possível abrir o arquivo: ${causa instanceof Error ? causa.message : 'erro desconhecido'}`) }
+  }
+
+  async function baixarArquivo(caminho: string) {
+    try {
+      const resposta = await fetch(await obterUrlArquivo(caminho))
+      if (!resposta.ok) throw new Error('Falha ao baixar o arquivo.')
+      const objeto = URL.createObjectURL(await resposta.blob())
+      const link = document.createElement('a'); link.href = objeto; link.download = caminhoStorage(caminho).split('/').at(-1) ?? 'documento'; link.click(); URL.revokeObjectURL(objeto)
+    } catch (causa) { setErro(`Não foi possível baixar o arquivo: ${causa instanceof Error ? causa.message : 'erro desconhecido'}`) }
+  }
+
+  async function imprimirArquivo(caminho: string) {
+    try {
+      const resposta = await fetch(await obterUrlArquivo(caminho))
+      if (!resposta.ok) throw new Error('Falha ao preparar a impressão.')
+      const objeto = URL.createObjectURL(await resposta.blob())
+      const janela = window.open(objeto, '_blank', 'noopener')
+      if (!janela) throw new Error('Permita pop-ups para imprimir o documento.')
+      janela.addEventListener('load', () => { janela.focus(); janela.print() }, { once: true })
+      window.setTimeout(() => URL.revokeObjectURL(objeto), 60_000)
+    } catch (causa) { setErro(`Não foi possível imprimir o arquivo: ${causa instanceof Error ? causa.message : 'erro desconhecido'}`) }
+  }
+
   if (carregando) return <main className="min-h-screen grid place-items-center bg-surface text-white">Carregando…</main>
 
   if (!session || !perfil) {
@@ -593,6 +673,7 @@ function PortalWeb() {
       {pagina === 'saidas' && <section className="mx-auto max-w-[1180px] py-2 md:py-4"><div className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm font-semibold text-brand-400">ALMOXARIFADO</p><h2 className="mt-1 text-2xl font-bold">Saídas</h2><p className="mt-1 text-sm text-gray-400">Baixas de materiais retirados da obra.</p></div><button className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium hover:bg-amber-500" onClick={() => setNovaSaida(aberto => !aberto)}>{novaSaida ? 'Cancelar' : '+ Nova saída'}</button></div>{novaSaida && <form onSubmit={salvarSaida} className="mb-5 grid gap-3 rounded-xl border border-surface-border bg-surface p-4 md:grid-cols-2"><label className="text-sm text-gray-300">Material<select className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formSaida.produto_id} onChange={e => setFormSaida({ ...formSaida, produto_id: e.target.value })} required><option value="">Selecione</option>{produtosWeb.map(item => <option key={item.id} value={item.id}>{item.codigo} — {item.nome} ({item.estoque_atual} {item.unidade ?? ''})</option>)}</select></label><label className="text-sm text-gray-300">Retirado por<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formSaida.retirado_por_nome} onChange={e => setFormSaida({ ...formSaida, retirado_por_nome: e.target.value })} required /></label><label className="text-sm text-gray-300">Quantidade<input min="0.01" step="0.01" type="number" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formSaida.quantidade} onChange={e => setFormSaida({ ...formSaida, quantidade: e.target.value })} required /></label><label className="text-sm text-gray-300">Setor<input className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formSaida.setor} onChange={e => setFormSaida({ ...formSaida, setor: e.target.value })} /></label><label className="text-sm text-gray-300">Data<input type="date" className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2.5 text-white" value={formSaida.data} onChange={e => setFormSaida({ ...formSaida, data: e.target.value })} required /></label><div className="md:col-span-2"><button className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={salvandoSaida}>{salvandoSaida ? 'Salvando…' : 'Registrar saída'}</button></div></form>}<div className="overflow-x-auto rounded-xl border border-surface-border bg-surface"><table className="w-full min-w-[620px] text-left text-sm"><thead className="bg-surface-card text-gray-400"><tr><th className="p-3">Data</th><th className="p-3">Material</th><th className="p-3">Retirado por</th><th className="p-3 text-right">Quantidade</th></tr></thead><tbody>{saidasWeb.length === 0 ? <tr><td colSpan={4} className="p-6 text-gray-400">Nenhuma saída registrada.</td></tr> : saidasWeb.map(item => <tr key={item.id} className="border-t border-surface-border"><td className="p-3 text-gray-300">{item.data}</td><td className="p-3 font-medium">{item.produto_nome}<span className="ml-2 text-xs text-gray-500">{item.produto_codigo}</span></td><td className="p-3 text-gray-300">{item.retirado_por_nome}{item.setor ? ` · ${item.setor}` : ''}</td><td className="p-3 text-right text-amber-300">{item.quantidade}</td></tr>)}</tbody></table></div></section>}
       {pagina === 'ap' && <section className="mx-auto max-w-[1180px] py-2 md:py-4"><div className="mb-6"><p className="text-sm font-semibold text-brand-400">FINANCEIRO</p><h2 className="mt-1 text-2xl font-bold">Autorizações de pagamento</h2><p className="mt-1 text-sm text-gray-400">Revise e autorize os pagamentos da obra.</p></div><div className="overflow-x-auto rounded-xl border border-surface-border bg-surface"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-surface-card text-gray-400"><tr><th className="p-3">Beneficiário</th><th className="p-3">Descrição</th><th className="p-3">Vencimento</th><th className="p-3 text-right">Valor</th><th className="p-3"></th></tr></thead><tbody>{autorizacoesWeb.length === 0 ? <tr><td colSpan={5} className="p-6 text-gray-400">Nenhuma autorização encontrada.</td></tr> : autorizacoesWeb.map(item => <tr key={item.id} className="border-t border-surface-border"><td className="p-3 font-medium">{item.beneficiario_nome}</td><td className="p-3 text-gray-300">{item.descricao ?? '—'}</td><td className="p-3 text-gray-400">{item.vencimento ?? '—'}</td><td className="p-3 text-right text-amber-300">{Number(item.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td className="p-3 text-right">{item.aprovado_por ? <span className="text-xs text-emerald-300">Autorizada</span> : <button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={itemFinanceiroProcessando === `ap-${item.id}`} onClick={() => void aprovarItemFinanceiro('ap', item.id)}>{itemFinanceiroProcessando === `ap-${item.id}` ? 'Autorizando…' : 'Autorizar'}</button>}</td></tr>)}</tbody></table></div></section>}
       {pagina === 'notas' && <section className="mx-auto max-w-[1180px] py-2 md:py-4"><div className="mb-6"><p className="text-sm font-semibold text-brand-400">FINANCEIRO</p><h2 className="mt-1 text-2xl font-bold">Notas fiscais</h2><p className="mt-1 text-sm text-gray-400">Revise e autorize as notas fiscais da obra.</p></div><div className="overflow-x-auto rounded-xl border border-surface-border bg-surface"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-surface-card text-gray-400"><tr><th className="p-3">Fornecedor</th><th className="p-3">NF</th><th className="p-3">Data</th><th className="p-3 text-right">Valor</th><th className="p-3"></th></tr></thead><tbody>{notasFiscaisWeb.length === 0 ? <tr><td colSpan={5} className="p-6 text-gray-400">Nenhuma nota fiscal encontrada.</td></tr> : notasFiscaisWeb.map(item => <tr key={item.id} className="border-t border-surface-border"><td className="p-3 font-medium">{item.fornecedor_nome}</td><td className="p-3 text-gray-300">{item.numero_nf ?? '—'}</td><td className="p-3 text-gray-400">{item.data}</td><td className="p-3 text-right text-amber-300">{Number(item.valor_total).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td className="p-3 text-right">{item.aprovado_por ? <span className="text-xs text-emerald-300">Autorizada</span> : <button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={itemFinanceiroProcessando === `nf-${item.id}`} onClick={() => void aprovarItemFinanceiro('nf', item.id)}>{itemFinanceiroProcessando === `nf-${item.id}` ? 'Autorizando…' : 'Autorizar'}</button>}</td></tr>)}</tbody></table></div></section>}
+      {['ap', 'notas'].includes(pagina) && <section className="mx-auto max-w-[1180px] pb-7"><div className="rounded-xl border border-surface-border bg-surface p-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="font-semibold">Documentos anexados</h3><p className="mt-1 text-sm text-gray-400">Visualize, baixe ou imprima os arquivos armazenados com segurança no Supabase.</p></div><div className="flex flex-wrap gap-2"><select aria-label="Tipo de documento" className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" value={documentoFinanceiroTipo} onChange={e => { const tipo = e.target.value as 'ap' | 'nf'; setDocumentoFinanceiroTipo(tipo); setDocumentoFinanceiroId(''); setAnexosFinanceiros([]) }}><option value="ap">Autorização de pagamento</option><option value="nf">Nota fiscal</option></select><select aria-label="Documento financeiro" className="max-w-72 rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" value={documentoFinanceiroId} onChange={e => { setDocumentoFinanceiroId(e.target.value); void carregarAnexosFinanceiros(documentoFinanceiroTipo, e.target.value) }}><option value="">Selecione o documento</option>{(documentoFinanceiroTipo === 'ap' ? autorizacoesWeb : notasFiscaisWeb).map(item => <option key={item.id} value={item.id}>{documentoFinanceiroTipo === 'ap' ? `${(item as AutorizacaoWeb).beneficiario_nome} — ${(item as AutorizacaoWeb).valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : `${(item as NotaFiscalWeb).fornecedor_nome} — NF ${(item as NotaFiscalWeb).numero_nf ?? '—'}`}</option>)}</select></div></div>{documentoFinanceiroId && <><div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">{carregandoAnexosFinanceiros ? <p className="p-4 text-sm text-gray-400">Carregando anexos…</p> : anexosFinanceiros.length === 0 ? <p className="p-4 text-sm text-gray-400">Nenhum arquivo anexado a este documento.</p> : anexosFinanceiros.map((anexo, indice) => <div key={anexo.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><p className="min-w-0 truncate text-sm">{caminhoStorage(anexo.caminho).split('/').at(-1) ?? `Documento ${indice + 1}`}</p><div className="flex shrink-0 gap-2"><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void visualizarArquivo(anexo.caminho)}>Abrir</button><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void baixarArquivo(anexo.caminho)}>Baixar</button><button className="rounded-md border border-surface-border px-3 py-1.5 text-xs text-gray-200 hover:bg-surface-hover" onClick={() => void imprimirArquivo(anexo.caminho)}>Imprimir</button></div></div>)}</div>{['admin', 'master'].includes(perfil.perfil) && <form onSubmit={enviarAnexosFinanceiros} className="mt-4 border-t border-surface-border pt-4"><label className="block text-sm text-gray-300">Anexar documentos<input className="mt-2 block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white" type="file" multiple onChange={e => setNovosAnexosFinanceiros(Array.from(e.target.files ?? []))} required /></label>{novosAnexosFinanceiros.length > 0 && <p className="mt-2 text-xs text-gray-400">{novosAnexosFinanceiros.map(arquivo => arquivo.name).join(', ')}</p>}<button className="mt-3 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60" disabled={enviandoAnexosFinanceiros}>{enviandoAnexosFinanceiros ? 'Enviando…' : 'Enviar anexos'}</button></form>}</>}</div></section>}
     </main></div>
   </div>
 }
