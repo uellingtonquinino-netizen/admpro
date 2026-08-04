@@ -592,6 +592,9 @@ function PortalWeb() {
   >(new Set());
   const [processandoLote, setProcessandoLote] = useState(false);
   const [buscaProduto, setBuscaProduto] = useState("");
+  const [buscaGeral, setBuscaGeral] = useState("");
+  const [periodoInicial, setPeriodoInicial] = useState("0001-01-01");
+  const [periodoFinal, setPeriodoFinal] = useState(new Date().toISOString().slice(0, 10));
   const [novaEntrada, setNovaEntrada] = useState(false);
   const [salvandoEntrada, setSalvandoEntrada] = useState(false);
   const [formEntrada, setFormEntrada] = useState({
@@ -2524,7 +2527,7 @@ function PortalWeb() {
           <div className="flex items-center gap-3">
             <div className="hidden w-52 items-center gap-2 rounded-lg border border-[#40506d] bg-[#263550] px-3 py-1.5 text-xs text-gray-400 md:flex">
               <Search size={13} />
-              Buscar…
+              <input aria-label="Buscar" value={buscaGeral} onChange={e => setBuscaGeral(e.target.value)} className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Buscar..." />
             </div>
             <button
               className="relative rounded-lg p-2 text-gray-300 hover:bg-surface-hover"
@@ -3047,7 +3050,7 @@ function PortalWeb() {
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   {[
                     ...new Set(
-                      resumoSupervisor.obras.map(
+                      resumoSupervisor.obras.filter(obra => `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`.toLowerCase().includes(buscaGeral.toLowerCase())).map(
                         (obra) => obra.estado || "Sem estado",
                       ),
                     ),
@@ -3112,14 +3115,14 @@ function PortalWeb() {
                             Programação financeira
                           </p>
                           {lotesWeb.filter(
-                            (lote) => lote.empresa_id === obra.id,
+                            (lote) => lote.empresa_id === obra.id && lote.titulo.toLowerCase().includes(buscaGeral.toLowerCase()),
                           ).length === 0 ? (
                             <p className="mt-2 text-sm text-gray-400">
                               Nenhum lote enviado para esta obra.
                             </p>
                           ) : (
                             lotesWeb
-                              .filter((lote) => lote.empresa_id === obra.id)
+                              .filter((lote) => lote.empresa_id === obra.id && lote.titulo.toLowerCase().includes(buscaGeral.toLowerCase()))
                               .map((lote) => (
                                 <button
                                   key={lote.id}
@@ -3159,6 +3162,7 @@ function PortalWeb() {
                     VISÃO GERAL
                   </p>
                   <h2 className="mt-1 text-2xl font-bold">Suas obras</h2>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-300"><span className="font-semibold text-gray-400">PERÍODO</span><input aria-label="Data inicial" type="date" value={periodoInicial} onChange={e => setPeriodoInicial(e.target.value)} className="rounded-lg border border-surface-border bg-surface-card px-2 py-1.5" /><span>até</span><input aria-label="Data final" type="date" value={periodoFinal} onChange={e => setPeriodoFinal(e.target.value)} className="rounded-lg border border-surface-border bg-surface-card px-2 py-1.5" /></div>
                   <p className="mt-1 text-sm text-gray-400">
                     Acompanhamento consolidado das obras sob sua gestão.
                   </p>
@@ -3229,7 +3233,7 @@ function PortalWeb() {
                   </div>
                 </div>
                 <div className="mt-6 grid gap-5 2xl:grid-cols-3">
-                  <section className="rounded-2xl border border-surface-border bg-surface p-5 2xl:col-span-2">
+                  <section className="hidden rounded-2xl border border-surface-border bg-surface p-5 2xl:col-span-2">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h3 className="font-semibold">Obras acompanhadas</h3>
@@ -3253,7 +3257,7 @@ function PortalWeb() {
                           Nenhuma obra vinculada a este supervisor.
                         </p>
                       ) : (
-                        resumoSupervisor.obras.map((obra) => (
+                        resumoSupervisor.obras.filter(obra => `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`.toLowerCase().includes(buscaGeral.toLowerCase())).map((obra) => (
                           <div
                             key={obra.id}
                             className="flex items-center justify-between gap-4 py-4"
@@ -5206,6 +5210,7 @@ function PortalWeb() {
                 serie={serieSupervisor}
               />
             )}
+          {perfil.perfil === "supervisor" && pagina === "supervisor" && resumoSupervisor && <section className="mx-auto max-w-7xl pb-7"><p className="mb-3 text-xs font-bold uppercase tracking-widest text-brand-300">Obras acompanhadas</p><div className="space-y-2">{resumoSupervisor.obras.filter(obra => `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`.toLowerCase().includes(buscaGeral.toLowerCase())).map(obra => <button key={obra.id} onClick={() => { setEstadoSupervisor(obra.estado || "Sem estado"); navegar("supervisor_obra") }} className="flex w-full items-center justify-between rounded-xl border border-surface-border bg-surface p-4 text-left hover:border-brand-500"><span><strong>{obra.titulo_obra || obra.nome}</strong><small className="ml-2 text-gray-400">{obra.estado || "Sem estado"}</small></span><span className="text-brand-300">Abrir →</span></button>)}</div></section>}
           {perfil.perfil === "supervisor" && pagina === "supervisor" && (
             <section className="mx-auto max-w-7xl pb-7">
               <div className="rounded-2xl border border-surface-border bg-surface p-5">
@@ -5318,7 +5323,7 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {(pagina === "supervisor" || pagina === "central") && (
+          {false && (pagina === "supervisor" || pagina === "central") && (
             <section className="mx-auto max-w-7xl pb-7">
               <div className="rounded-xl border border-surface-border bg-surface p-4">
                 <div className="flex flex-wrap items-end justify-between gap-3">
