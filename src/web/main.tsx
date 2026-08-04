@@ -78,6 +78,8 @@ type Lancamento = {
   data: string;
   data_venc: string | null;
   status: string;
+  categoria_id: number | null;
+  conta_id: number | null;
 };
 type Colaborador = {
   id: number;
@@ -617,6 +619,9 @@ function PortalWeb() {
     data: new Date().toISOString().slice(0, 10),
   });
   const [novoLancamento, setNovoLancamento] = useState(false);
+  const [editandoLancamentoId, setEditandoLancamentoId] = useState<
+    number | null
+  >(null);
   const [salvandoLancamento, setSalvandoLancamento] = useState(false);
   const [formLancamento, setFormLancamento] = useState({
     descricao: "",
@@ -1203,7 +1208,7 @@ function PortalWeb() {
         });
         const { data: listaFinanceira, error: erroFinanceiro } = await supabase
           .from("lancamentos")
-          .select("id,descricao,valor,tipo,data,data_venc,status")
+          .select("id,descricao,valor,tipo,data,data_venc,status,categoria_id,conta_id")
           .eq("empresa_id", data.empresa_id)
           .order("data", { ascending: false })
           .order("id", { ascending: false })
@@ -1360,7 +1365,7 @@ function PortalWeb() {
     }
     setErro("");
     setSalvandoLancamento(true);
-    const { error } = await supabase.rpc("criar_lancamento", {
+    const dados = {
       p: {
         empresa_id: perfil.empresa_id,
         descricao: formLancamento.descricao.trim(),
@@ -1373,13 +1378,19 @@ function PortalWeb() {
         conta_id: Number(formLancamento.conta_id),
         observacao: null,
       },
-    });
+    };
+    const { error } = editandoLancamentoId
+      ? await supabase.rpc("atualizar_lancamento", {
+          p: { ...dados.p, id: editandoLancamentoId },
+        })
+      : await supabase.rpc("criar_lancamento", dados);
     setSalvandoLancamento(false);
     if (error) {
       setErro(`Não foi possível salvar o lançamento: ${error.message}`);
       return;
     }
     setNovoLancamento(false);
+    setEditandoLancamentoId(null);
     setFormLancamento({
       descricao: "",
       valor: "",
@@ -1390,6 +1401,26 @@ function PortalWeb() {
       conta_id: "",
     });
     await carregarPerfil(session);
+  }
+
+  function editarLancamento(item: Lancamento) {
+    if (!item.categoria_id || !item.conta_id) {
+      setErro(
+        "Este lançamento não possui categoria ou conta. Edite-o pelo documento financeiro de origem.",
+      );
+      return;
+    }
+    setEditandoLancamentoId(item.id);
+    setFormLancamento({
+      descricao: item.descricao,
+      valor: String(item.valor),
+      tipo: item.tipo,
+      data: item.data,
+      data_venc: item.data_venc ?? "",
+      categoria_id: String(item.categoria_id),
+      conta_id: String(item.conta_id),
+    });
+    setNovoLancamento(true);
   }
 
   async function salvarFornecedor(evento: FormEvent) {
@@ -4203,7 +4234,10 @@ function PortalWeb() {
                   {perfil.perfil === "admin" && (
                     <button
                       className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium hover:bg-brand-500"
-                      onClick={() => setNovoLancamento((aberto) => !aberto)}
+                      onClick={() => {
+                        setEditandoLancamentoId(null);
+                        setNovoLancamento((aberto) => !aberto);
+                      }}
                     >
                       {novoLancamento ? "Cancelar" : "+ Novo lançamento"}
                     </button>
@@ -4369,7 +4403,11 @@ function PortalWeb() {
                         className="rounded-md bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60"
                         disabled={salvandoLancamento}
                       >
-                        {salvandoLancamento ? "Salvando…" : "Salvar lançamento"}
+                        {salvandoLancamento
+                          ? "Salvando…"
+                          : editandoLancamentoId
+                            ? "Salvar alterações"
+                            : "Salvar lançamento"}
                       </button>
                     </div>
                   </form>
@@ -4426,6 +4464,15 @@ function PortalWeb() {
                             })}
                           </strong>
                         </div>
+                        {perfil.perfil === "admin" && (
+                          <button
+                            type="button"
+                            className="mt-4 rounded-lg border border-surface-border px-3 py-2 text-xs hover:bg-surface-hover"
+                            onClick={() => editarLancamento(item)}
+                          >
+                            Editar lançamento
+                          </button>
+                        )}
                       </article>
                     ))
                   )}
@@ -4438,12 +4485,13 @@ function PortalWeb() {
                         <th className="p-3">Descrição</th>
                         <th className="p-3">Situação</th>
                         <th className="p-3 text-right">Valor</th>
+                        <th className="p-3"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {lancamentosFiltrados.length === 0 ? (
                         <tr>
-                          <td className="p-5 text-gray-400" colSpan={4}>
+                          <td className="p-5 text-gray-400" colSpan={5}>
                             Nenhum lançamento encontrado.
                           </td>
                         </tr>
@@ -4472,6 +4520,17 @@ function PortalWeb() {
                                 style: "currency",
                                 currency: "BRL",
                               })}
+                            </td>
+                            <td className="p-3 text-right">
+                              {perfil.perfil === "admin" && (
+                                <button
+                                  type="button"
+                                  className="rounded-lg border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                                  onClick={() => editarLancamento(item)}
+                                >
+                                  Editar
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))
