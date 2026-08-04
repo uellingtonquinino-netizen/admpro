@@ -536,11 +536,13 @@ function PortalWeb() {
     | "supervisor"
     | "supervisor_estados"
     | "supervisor_obra"
+    | "supervisor_lote"
     | "supervisor_configuracoes"
     | "pessoal"
     | "central"
   >("inicio");
   const [estadoSupervisor, setEstadoSupervisor] = useState<string | null>(null);
+  const [loteSupervisorId, setLoteSupervisorId] = useState<number | null>(null);
   const [menuAberto, setMenuAberto] = useState(false);
   const [buscaColaborador, setBuscaColaborador] = useState("");
   const [filtroStatusRh, setFiltroStatusRh] = useState("todos");
@@ -762,7 +764,9 @@ function PortalWeb() {
             .in("empresa_id", empresaIds),
           supabase
             .from("lotes_financeiros")
-            .select("id,empresa_id,numero,titulo,criado_por,created_at,enviado_em")
+            .select(
+              "id,empresa_id,numero,titulo,criado_por,created_at,enviado_em",
+            )
             .in("empresa_id", empresaIds)
             .not("enviado_em", "is", null)
             .order("created_at", { ascending: false }),
@@ -1879,21 +1883,17 @@ function PortalWeb() {
         if (erroUpload) throw erroUpload;
         const resultadoRegistro =
           documentoFinanceiroTipo === "ap"
-            ? await supabase
-                .from("autorizacoes_pagamento_anexos")
-                .insert({
-                  ap_id: Number(documentoFinanceiroId),
-                  caminho: `supabase://documentos-rh/${caminho}`,
-                  ordem,
-                })
-            : await supabase
-                .from("notas_fiscais_anexos")
-                .insert({
-                  nota_id: Number(documentoFinanceiroId),
-                  caminho: `supabase://documentos-rh/${caminho}`,
-                  categoria: "nota",
-                  ordem,
-                });
+            ? await supabase.from("autorizacoes_pagamento_anexos").insert({
+                ap_id: Number(documentoFinanceiroId),
+                caminho: `supabase://documentos-rh/${caminho}`,
+                ordem,
+              })
+            : await supabase.from("notas_fiscais_anexos").insert({
+                nota_id: Number(documentoFinanceiroId),
+                caminho: `supabase://documentos-rh/${caminho}`,
+                categoria: "nota",
+                ordem,
+              });
         const erroRegistro = resultadoRegistro.error;
         if (erroRegistro) throw erroRegistro;
       }
@@ -2163,6 +2163,7 @@ function PortalWeb() {
       | "supervisor"
       | "supervisor_estados"
       | "supervisor_obra"
+      | "supervisor_lote"
       | "supervisor_configuracoes"
       | "pessoal"
       | "central",
@@ -3009,8 +3010,120 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {perfil.perfil === "supervisor" && pagina === "supervisor_estados" && resumoSupervisor && <section className="mx-auto max-w-7xl py-4"><button className="text-sm text-brand-300" onClick={() => navegar("supervisor")}>← Voltar ao Painel de Resumo</button><h2 className="mt-4 text-2xl font-bold">Obras por estado</h2><p className="mt-1 text-sm text-gray-400">Selecione um estado para ver as obras sob sua gestão.</p><div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{[...new Set(resumoSupervisor.obras.map(obra => obra.estado || 'Sem estado'))].map(estado => <button key={estado} className="rounded-2xl border border-surface-border bg-surface p-5 text-left hover:border-brand-500" onClick={() => { setEstadoSupervisor(estado); navegar("supervisor_obra") }}><p className="text-xs font-bold uppercase text-brand-300">Estado</p><p className="mt-2 text-xl font-bold">{estado}</p><p className="mt-2 text-sm text-gray-400">{resumoSupervisor.obras.filter(obra => (obra.estado || 'Sem estado') === estado).length} obra(s)</p></button>)}</div></section>}
-          {perfil.perfil === "supervisor" && pagina === "supervisor_obra" && resumoSupervisor && <section className="mx-auto max-w-7xl py-4"><button className="text-sm text-brand-300" onClick={() => navegar("supervisor_estados")}>← Voltar aos estados</button><h2 className="mt-4 text-2xl font-bold">{estadoSupervisor || 'Obras'}</h2><div className="mt-6 grid gap-4 lg:grid-cols-2">{resumoSupervisor.obras.filter(obra => (obra.estado || 'Sem estado') === estadoSupervisor).map(obra => <article key={obra.id} className="rounded-2xl border border-surface-border bg-surface p-5"><p className="text-lg font-bold">{obra.titulo_obra || obra.nome}</p><p className="mt-1 text-sm text-gray-400">{obra.nome}</p><div className="mt-4 border-t border-surface-border pt-4"><p className="text-sm font-semibold">Programação financeira</p>{lotesWeb.filter(lote => lote.empresa_id === obra.id).length === 0 ? <p className="mt-2 text-sm text-gray-400">Nenhum lote enviado para esta obra.</p> : lotesWeb.filter(lote => lote.empresa_id === obra.id).map(lote => <div key={lote.id} className="mt-2 rounded-lg bg-surface-card p-3 text-sm"><strong>{lote.titulo}</strong><span className="ml-2 text-gray-400">{lote.enviado_em ? new Date(lote.enviado_em).toLocaleDateString('pt-BR') : ''}</span></div>)}</div></article>)}</div></section>}
+          {perfil.perfil === "supervisor" && pagina === "supervisor_lote" && loteSupervisorId !== null && <section className="mx-auto max-w-7xl py-4">{(() => { const lote = lotesWeb.find(item => item.id === loteSupervisorId); const itens = itensSupervisorPendentes.filter(item => item.lote_id === loteSupervisorId); return <><button className="text-sm text-brand-300" onClick={() => navegar("supervisor_obra")}>← Voltar aos lotes</button><div className="mt-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-bold">{lote?.titulo ?? 'Lote'}</h2><p className="mt-1 text-sm text-gray-400">Autorizações de pagamento e notas fiscais enviadas pelo Administrador.</p></div><div className="flex gap-2"><button className="rounded-lg border border-surface-border px-3 py-2 text-sm">Gerar capa</button><button className="rounded-lg border border-surface-border px-3 py-2 text-sm">Exportar lote</button></div></div><div className="mt-6 overflow-hidden rounded-xl border border-surface-border bg-surface"><div className="border-b border-surface-border p-4 text-sm font-semibold">Documentos do lote</div>{itens.length === 0 ? <p className="p-5 text-sm text-gray-400">Nenhum documento pendente neste lote.</p> : itens.map(item => <div key={`${item.tipo}-${item.id}`} className="flex flex-col gap-3 border-b border-surface-border p-4 last:border-0 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">{item.nome}</p><p className="mt-1 text-sm text-gray-400">{item.referencia}{item.valor !== null ? ` · ${Number(item.valor).toLocaleString('pt-BR', { style:'currency', currency:'BRL' })}` : ''}</p></div><div className="flex flex-wrap gap-2"><button className="rounded-lg border border-surface-border px-3 py-2 text-xs" onClick={() => { setDocumentoFinanceiroTipo(item.tipo); setDocumentoFinanceiroId(String(item.id)); void carregarAnexosFinanceiros(item.tipo, String(item.id)) }}>Visualizar documentos</button><button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={itemCentralProcessando === `${item.tipo}-${item.id}`} onClick={() => void aprovarItemPendente(item)}>{itemCentralProcessando === `${item.tipo}-${item.id}` ? 'Autorizando…' : 'Autorizar'}</button></div></div>)}</div></>})()}</section>}
+          {perfil.perfil === "supervisor" &&
+            pagina === "supervisor_estados" &&
+            resumoSupervisor && (
+              <section className="mx-auto max-w-7xl py-4">
+                <button
+                  className="text-sm text-brand-300"
+                  onClick={() => navegar("supervisor")}
+                >
+                  ← Voltar ao Painel de Resumo
+                </button>
+                <h2 className="mt-4 text-2xl font-bold">Obras por estado</h2>
+                <p className="mt-1 text-sm text-gray-400">
+                  Selecione um estado para ver as obras sob sua gestão.
+                </p>
+                <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {[
+                    ...new Set(
+                      resumoSupervisor.obras.map(
+                        (obra) => obra.estado || "Sem estado",
+                      ),
+                    ),
+                  ].map((estado) => (
+                    <button
+                      key={estado}
+                      className="rounded-2xl border border-surface-border bg-surface p-5 text-left hover:border-brand-500"
+                      onClick={() => {
+                        setEstadoSupervisor(estado);
+                        navegar("supervisor_obra");
+                      }}
+                    >
+                      <p className="text-xs font-bold uppercase text-brand-300">
+                        Estado
+                      </p>
+                      <p className="mt-2 text-xl font-bold">{estado}</p>
+                      <p className="mt-2 text-sm text-gray-400">
+                        {
+                          resumoSupervisor.obras.filter(
+                            (obra) => (obra.estado || "Sem estado") === estado,
+                          ).length
+                        }{" "}
+                        obra(s)
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+          {perfil.perfil === "supervisor" &&
+            pagina === "supervisor_obra" &&
+            resumoSupervisor && (
+              <section className="mx-auto max-w-7xl py-4">
+                <button
+                  className="text-sm text-brand-300"
+                  onClick={() => navegar("supervisor_estados")}
+                >
+                  ← Voltar aos estados
+                </button>
+                <h2 className="mt-4 text-2xl font-bold">
+                  {estadoSupervisor || "Obras"}
+                </h2>
+                <div className="mt-6 grid gap-4 lg:grid-cols-2">
+                  {resumoSupervisor.obras
+                    .filter(
+                      (obra) =>
+                        (obra.estado || "Sem estado") === estadoSupervisor,
+                    )
+                    .map((obra) => (
+                      <article
+                        key={obra.id}
+                        className="rounded-2xl border border-surface-border bg-surface p-5"
+                      >
+                        <p className="text-lg font-bold">
+                          {obra.titulo_obra || obra.nome}
+                        </p>
+                        <p className="mt-1 text-sm text-gray-400">
+                          {obra.nome}
+                        </p>
+                        <div className="mt-4 border-t border-surface-border pt-4">
+                          <p className="text-sm font-semibold">
+                            Programação financeira
+                          </p>
+                          {lotesWeb.filter(
+                            (lote) => lote.empresa_id === obra.id,
+                          ).length === 0 ? (
+                            <p className="mt-2 text-sm text-gray-400">
+                              Nenhum lote enviado para esta obra.
+                            </p>
+                          ) : (
+                            lotesWeb
+                              .filter((lote) => lote.empresa_id === obra.id)
+                              .map((lote) => (
+                                <button
+                                  key={lote.id}
+                                  onClick={() => { setLoteSupervisorId(lote.id); navegar("supervisor_lote") }}
+                                  className="mt-2 block w-full rounded-lg bg-surface-card p-3 text-left text-sm hover:bg-surface-hover"
+                                >
+                                  <strong>{lote.titulo}</strong>
+                                  <span className="ml-2 text-gray-400">
+                                    {lote.enviado_em
+                                      ? new Date(
+                                          lote.enviado_em,
+                                        ).toLocaleDateString("pt-BR")
+                                      : ""}
+                                  </span>
+                                </button>
+                              ))
+                          )}
+                        </div>
+                      </article>
+                    ))}
+                </div>
+              </section>
+            )}
           {perfil.perfil === "supervisor" &&
             pagina === "supervisor" &&
             resumoSupervisor && (
@@ -3098,7 +3211,13 @@ function PortalWeb() {
                           Organizadas por estado, como no painel desktop.
                         </p>
                       </div>
-                      <button className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white" onClick={() => { setEstadoSupervisor(null); navegar("supervisor_estados") }}>
+                      <button
+                        className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white"
+                        onClick={() => {
+                          setEstadoSupervisor(null);
+                          navegar("supervisor_estados");
+                        }}
+                      >
                         Ver obras ({resumoSupervisor.obras.length})
                       </button>
                     </div>
@@ -5076,8 +5195,112 @@ function PortalWeb() {
           {perfil.perfil === "supervisor" && pagina === "supervisor" && (
             <section className="mx-auto max-w-7xl pb-7">
               <div className="rounded-2xl border border-surface-border bg-surface p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Lotes enviados para aprovação</h2><p className="mt-1 text-sm text-gray-400">APs e notas fiscais são analisadas dentro dos lotes enviados pelo Administrador.</p></div><span className="rounded-full bg-amber-500/15 px-3 py-1.5 text-sm text-amber-300">{itensSupervisorPendentes.length} pendente(s)</span></div>
-                <div className="mt-4 divide-y divide-surface-border">{lotesWeb.length === 0 ? <p className="py-5 text-sm text-gray-400">Nenhum lote enviado para suas obras.</p> : lotesWeb.map(lote => { const itens = itensSupervisorPendentes.filter(item => item.lote_id === lote.id); return <article key={lote.id} className="py-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-semibold">{lote.titulo}</p><p className="mt-1 text-xs text-gray-400">Enviado em {lote.enviado_em ? new Date(lote.enviado_em).toLocaleDateString('pt-BR') : '—'} · {itens.length} item(ns) pendente(s)</p></div><span className={itens.length ? 'rounded-full bg-amber-500/15 px-2.5 py-1 text-xs text-amber-300' : 'rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-300'}>{itens.length ? 'Pendente' : 'Concluído'}</span></div>{itens.length > 0 && <div className="mt-3 divide-y divide-surface-border rounded-lg border border-surface-border">{itens.map(item => <div key={`${item.tipo}-${item.id}`} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-medium">{item.nome}</p><p className="text-xs text-gray-400">{item.referencia}{item.valor !== null ? ` · ${Number(item.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : ''}</p></div><div className="flex flex-wrap gap-2"><button className="rounded-lg border border-surface-border px-3 py-2 text-xs" onClick={() => { setDocumentoFinanceiroTipo(item.tipo); setDocumentoFinanceiroId(String(item.id)); void carregarAnexosFinanceiros(item.tipo, String(item.id)) }}>Documentos</button><button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={itemCentralProcessando === `${item.tipo}-${item.id}`} onClick={() => void aprovarItemPendente(item)}>{itemCentralProcessando === `${item.tipo}-${item.id}` ? 'Aprovando…' : 'Aprovar'}</button></div></div>)}</div>}</article> })}</div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-semibold">
+                      Lotes enviados para aprovação
+                    </h2>
+                    <p className="mt-1 text-sm text-gray-400">
+                      APs e notas fiscais são analisadas dentro dos lotes
+                      enviados pelo Administrador.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-amber-500/15 px-3 py-1.5 text-sm text-amber-300">
+                    {itensSupervisorPendentes.length} pendente(s)
+                  </span>
+                </div>
+                <div className="mt-4 divide-y divide-surface-border">
+                  {lotesWeb.length === 0 ? (
+                    <p className="py-5 text-sm text-gray-400">
+                      Nenhum lote enviado para suas obras.
+                    </p>
+                  ) : (
+                    lotesWeb.map((lote) => {
+                      const itens = itensSupervisorPendentes.filter(
+                        (item) => item.lote_id === lote.id,
+                      );
+                      return (
+                        <article key={lote.id} className="py-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <p className="font-semibold">{lote.titulo}</p>
+                              <p className="mt-1 text-xs text-gray-400">
+                                Enviado em{" "}
+                                {lote.enviado_em
+                                  ? new Date(
+                                      lote.enviado_em,
+                                    ).toLocaleDateString("pt-BR")
+                                  : "—"}{" "}
+                                · {itens.length} item(ns) pendente(s)
+                              </p>
+                            </div>
+                            <span
+                              className={
+                                itens.length
+                                  ? "rounded-full bg-amber-500/15 px-2.5 py-1 text-xs text-amber-300"
+                                  : "rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-300"
+                              }
+                            >
+                              {itens.length ? "Pendente" : "Concluído"}
+                            </span>
+                          </div>
+                          {itens.length > 0 && (
+                            <div className="mt-3 divide-y divide-surface-border rounded-lg border border-surface-border">
+                              {itens.map((item) => (
+                                <div
+                                  key={`${item.tipo}-${item.id}`}
+                                  className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between"
+                                >
+                                  <div>
+                                    <p className="font-medium">{item.nome}</p>
+                                    <p className="text-xs text-gray-400">
+                                      {item.referencia}
+                                      {item.valor !== null
+                                        ? ` · ${Number(item.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`
+                                        : ""}
+                                    </p>
+                                  </div>
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      className="rounded-lg border border-surface-border px-3 py-2 text-xs"
+                                      onClick={() => {
+                                        setDocumentoFinanceiroTipo(item.tipo);
+                                        setDocumentoFinanceiroId(
+                                          String(item.id),
+                                        );
+                                        void carregarAnexosFinanceiros(
+                                          item.tipo,
+                                          String(item.id),
+                                        );
+                                      }}
+                                    >
+                                      Documentos
+                                    </button>
+                                    <button
+                                      className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60"
+                                      disabled={
+                                        itemCentralProcessando ===
+                                        `${item.tipo}-${item.id}`
+                                      }
+                                      onClick={() =>
+                                        void aprovarItemPendente(item)
+                                      }
+                                    >
+                                      {itemCentralProcessando ===
+                                      `${item.tipo}-${item.id}`
+                                        ? "Aprovando…"
+                                        : "Aprovar"}
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </section>
           )}
@@ -5724,59 +5947,60 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {perfil.perfil === "supervisor" && pagina === "supervisor_configuracoes" && (
-            <section className="mx-auto max-w-7xl pb-7">
-              <div className="rounded-xl border border-surface-border bg-surface p-4">
-                <div>
-                  <h3 className="font-semibold">Assinatura do Supervisor</h3>
-                  <p className="mt-1 text-sm text-gray-400">
-                    Esta assinatura identifica suas aprovações; a data, hora e
-                    usuário ficam registrados no Supabase.
-                  </p>
-                </div>
-                <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
-                  <div className="grid h-24 w-48 place-items-center rounded-lg border border-dashed border-surface-border bg-surface-card">
-                    {carimboUrl ? (
-                      <img
-                        src={carimboUrl}
-                        alt="Assinatura cadastrada"
-                        className="h-full w-full object-contain p-2"
-                      />
-                    ) : (
-                      <span className="text-xs text-gray-500">
-                        Nenhuma assinatura cadastrada
-                      </span>
-                    )}
-                  </div>
+          {perfil.perfil === "supervisor" &&
+            pagina === "supervisor_configuracoes" && (
+              <section className="mx-auto max-w-7xl pb-7">
+                <div className="rounded-xl border border-surface-border bg-surface p-4">
                   <div>
-                    <input
-                      className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => selecionarCarimbo(e.target.files?.[0])}
-                    />
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60"
-                        disabled={salvandoCarimbo}
-                        onClick={() => void salvarCarimbo()}
-                      >
-                        {salvandoCarimbo ? "Salvando…" : "Salvar assinatura"}
-                      </button>
-                      {carimboUrl && (
-                        <button
-                          className="rounded-lg border border-surface-border px-4 py-2.5 text-sm text-gray-200"
-                          onClick={() => setCarimboUrl("")}
-                        >
-                          Remover
-                        </button>
+                    <h3 className="font-semibold">Assinatura do Supervisor</h3>
+                    <p className="mt-1 text-sm text-gray-400">
+                      Esta assinatura identifica suas aprovações; a data, hora e
+                      usuário ficam registrados no Supabase.
+                    </p>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+                    <div className="grid h-24 w-48 place-items-center rounded-lg border border-dashed border-surface-border bg-surface-card">
+                      {carimboUrl ? (
+                        <img
+                          src={carimboUrl}
+                          alt="Assinatura cadastrada"
+                          className="h-full w-full object-contain p-2"
+                        />
+                      ) : (
+                        <span className="text-xs text-gray-500">
+                          Nenhuma assinatura cadastrada
+                        </span>
                       )}
+                    </div>
+                    <div>
+                      <input
+                        className="block w-full text-sm text-gray-300 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white"
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => selecionarCarimbo(e.target.files?.[0])}
+                      />
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium disabled:opacity-60"
+                          disabled={salvandoCarimbo}
+                          onClick={() => void salvarCarimbo()}
+                        >
+                          {salvandoCarimbo ? "Salvando…" : "Salvar assinatura"}
+                        </button>
+                        {carimboUrl && (
+                          <button
+                            className="rounded-lg border border-surface-border px-4 py-2.5 text-sm text-gray-200"
+                            onClick={() => setCarimboUrl("")}
+                          >
+                            Remover
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            </section>
-          )}
+              </section>
+            )}
           {pagina === "ap" && perfil.perfil === "admin" && (
             <section className="mx-auto max-w-[1180px] pb-7">
               <div className="flex flex-wrap items-center gap-3 rounded-xl border border-surface-border bg-surface p-4">
