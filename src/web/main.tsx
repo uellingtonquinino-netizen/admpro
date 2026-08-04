@@ -467,6 +467,8 @@ function PortalWeb() {
   const [session, setSession] = useState<Session | null>(null);
   const [perfil, setPerfil] = useState<Perfil | null>(null);
   const [carimboUrl, setCarimboUrl] = useState("");
+  const [novoEmailConta, setNovoEmailConta] = useState("");
+  const [novaSenhaConta, setNovaSenhaConta] = useState("");
   const [salvandoCarimbo, setSalvandoCarimbo] = useState(false);
   const [resumo, setResumo] = useState<ResumoObra | null>(null);
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([]);
@@ -2098,6 +2100,17 @@ function PortalWeb() {
     );
   }
 
+  async function alterarConta() {
+    setErro("");
+    const dados: { email?: string; password?: string } = {};
+    if (novoEmailConta.trim()) dados.email = novoEmailConta.trim();
+    if (novaSenhaConta) dados.password = novaSenhaConta;
+    if (!dados.email && !dados.password) return;
+    const { error } = await supabase.auth.updateUser(dados);
+    if (error) { setErro(`Não foi possível atualizar a conta: ${error.message}`); return; }
+    setNovoEmailConta(""); setNovaSenhaConta("");
+  }
+
   if (carregando)
     return (
       <main className="min-h-screen grid place-items-center bg-surface text-white">
@@ -2261,6 +2274,9 @@ function PortalWeb() {
               <LayoutDashboard size={16} />
               Visão geral
             </button>
+          )}
+          {perfil.perfil === "supervisor" && (
+            <button className={pagina === "supervisor_configuracoes" ? "flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm" : "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover"} onClick={() => navegar("supervisor_configuracoes")}><ClipboardList size={16} />Configurações</button>
           )}
           {perfil.perfil === "setor_pessoal" && (
             <button
@@ -5419,6 +5435,7 @@ function PortalWeb() {
               </div>
             </section>
           )}
+          {perfil.perfil === "supervisor" && pagina === "supervisor_configuracoes" && <section className="mx-auto max-w-7xl pb-7"><div className="rounded-xl border border-surface-border bg-surface p-4"><h3 className="font-semibold">Dados de acesso</h3><p className="mt-1 text-sm text-gray-400">Ao alterar o e-mail, o Supabase enviará uma confirmação para o novo endereço.</p><div className="mt-4 grid gap-3 md:grid-cols-2"><label className="text-sm text-gray-300">Novo e-mail<input type="email" value={novoEmailConta} onChange={e => setNovoEmailConta(e.target.value)} className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-white" placeholder={perfil.email} /></label><label className="text-sm text-gray-300">Nova senha<input type="password" value={novaSenhaConta} onChange={e => setNovaSenhaConta(e.target.value)} className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-white" minLength={6} placeholder="Mínimo de 6 caracteres" /></label></div><button onClick={() => void alterarConta()} className="mt-4 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium">Salvar dados de acesso</button></div></section>}
           {pagina === "ap" && perfil.perfil === "admin" && (
             <section className="mx-auto max-w-[1180px] pb-7">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-border bg-surface p-4">
