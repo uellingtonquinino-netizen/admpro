@@ -594,7 +594,9 @@ function PortalWeb() {
   const [buscaProduto, setBuscaProduto] = useState("");
   const [buscaGeral, setBuscaGeral] = useState("");
   const [periodoInicial, setPeriodoInicial] = useState("0001-01-01");
-  const [periodoFinal, setPeriodoFinal] = useState(new Date().toISOString().slice(0, 10));
+  const [periodoFinal, setPeriodoFinal] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
   const [novaEntrada, setNovaEntrada] = useState(false);
   const [salvandoEntrada, setSalvandoEntrada] = useState(false);
   const [formEntrada, setFormEntrada] = useState({
@@ -904,7 +906,13 @@ function PortalWeb() {
               })),
           ]);
           setLotesWeb(lotes ?? []);
-          const { data: produtosSupervisor } = await supabase.from("produtos").select("id,empresa_id,codigo,nome,unidade,estoque_atual,estoque_minimo,valor_unitario").in("empresa_id", empresaIds).order("nome");
+          const { data: produtosSupervisor } = await supabase
+            .from("produtos")
+            .select(
+              "id,empresa_id,codigo,nome,unidade,estoque_atual,estoque_minimo,valor_unitario",
+            )
+            .in("empresa_id", empresaIds)
+            .order("nome");
           setProdutosWeb(produtosSupervisor ?? []);
           setAutorizacoesWeb(
             (autorizacoes ?? []).map((item) => ({
@@ -1979,6 +1987,44 @@ function PortalWeb() {
     }
   }
 
+  function exportarLoteSupervisor(lote: LoteWeb) {
+    const itens = itensSupervisorPendentes.filter(
+      (item) => item.lote_id === lote.id,
+    );
+    const linhas = [
+      "Tipo;Beneficiário/Fornecedor;Referência;Valor;Status",
+      ...itens.map(
+        (item) =>
+          `${item.tipo.toUpperCase()};${item.nome};${item.referencia};${item.valor ?? ""};Pendente`,
+      ),
+    ];
+    const url = URL.createObjectURL(
+      new Blob([linhas.join("\n")], { type: "text/csv;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${lote.titulo.replace(/[^a-z0-9]+/gi, "-")}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function imprimirResumoLote(lote: LoteWeb) {
+    const itens = itensSupervisorPendentes.filter(
+      (item) => item.lote_id === lote.id,
+    );
+    const janela = window.open("", "_blank", "noopener");
+    if (!janela) {
+      setErro("Permita pop-ups para gerar a capa do lote.");
+      return;
+    }
+    janela.document.write(
+      `<html><head><title>${lote.titulo}</title><style>body{font-family:Arial;padding:32px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #bbb;padding:8px;text-align:left}</style></head><body><h1>${lote.titulo}</h1><p>Resumo do lote financeiro</p><table><thead><tr><th>Tipo</th><th>Beneficiário/Fornecedor</th><th>Referência</th><th>Valor</th></tr></thead><tbody>${itens.map((item) => `<tr><td>${item.tipo.toUpperCase()}</td><td>${item.nome}</td><td>${item.referencia}</td><td>${item.valor?.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) ?? "—"}</td></tr>`).join("")}</tbody></table></body></html>`,
+    );
+    janela.document.close();
+    janela.focus();
+    janela.print();
+  }
+
   async function assinarPdfNoStorage(caminho: string) {
     if (!perfil || !carimboUrl) {
       setErro("Cadastre sua assinatura antes de assinar o PDF.");
@@ -2110,8 +2156,12 @@ function PortalWeb() {
     if (novaSenhaConta) dados.password = novaSenhaConta;
     if (!dados.email && !dados.password) return;
     const { error } = await supabase.auth.updateUser(dados);
-    if (error) { setErro(`Não foi possível atualizar a conta: ${error.message}`); return; }
-    setNovoEmailConta(""); setNovaSenhaConta("");
+    if (error) {
+      setErro(`Não foi possível atualizar a conta: ${error.message}`);
+      return;
+    }
+    setNovoEmailConta("");
+    setNovaSenhaConta("");
   }
 
   if (carregando)
@@ -2279,7 +2329,17 @@ function PortalWeb() {
             </button>
           )}
           {perfil.perfil === "supervisor" && (
-            <button className={pagina === "supervisor_configuracoes" ? "flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm" : "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover"} onClick={() => navegar("supervisor_configuracoes")}><ClipboardList size={16} />Configurações</button>
+            <button
+              className={
+                pagina === "supervisor_configuracoes"
+                  ? "flex w-full items-center gap-3 rounded-xl bg-brand-600 px-3 py-2.5 text-sm font-semibold shadow-glow-sm"
+                  : "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-gray-300 hover:bg-surface-hover"
+              }
+              onClick={() => navegar("supervisor_configuracoes")}
+            >
+              <ClipboardList size={16} />
+              Configurações
+            </button>
           )}
           {perfil.perfil === "setor_pessoal" && (
             <button
@@ -2527,7 +2587,13 @@ function PortalWeb() {
           <div className="flex items-center gap-3">
             <div className="hidden w-52 items-center gap-2 rounded-lg border border-[#40506d] bg-[#263550] px-3 py-1.5 text-xs text-gray-400 md:flex">
               <Search size={13} />
-              <input aria-label="Buscar" value={buscaGeral} onChange={e => setBuscaGeral(e.target.value)} className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Buscar..." />
+              <input
+                aria-label="Buscar"
+                value={buscaGeral}
+                onChange={(e) => setBuscaGeral(e.target.value)}
+                className="min-w-0 flex-1 bg-transparent outline-none"
+                placeholder="Buscar..."
+              />
             </div>
             <button
               className="relative rounded-lg p-2 text-gray-300 hover:bg-surface-hover"
@@ -3032,7 +3098,104 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {perfil.perfil === "supervisor" && pagina === "supervisor_lote" && loteSupervisorId !== null && <section className="mx-auto max-w-7xl py-4">{(() => { const lote = lotesWeb.find(item => item.id === loteSupervisorId); const itens = itensSupervisorPendentes.filter(item => item.lote_id === loteSupervisorId); return <><button className="text-sm text-brand-300" onClick={() => navegar("supervisor_obra")}>← Voltar aos lotes</button><div className="mt-4 flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-bold">{lote?.titulo ?? 'Lote'}</h2><p className="mt-1 text-sm text-gray-400">Autorizações de pagamento e notas fiscais enviadas pelo Administrador.</p></div><div className="flex gap-2"><button className="rounded-lg border border-surface-border px-3 py-2 text-sm">Gerar capa</button><button className="rounded-lg border border-surface-border px-3 py-2 text-sm">Exportar lote</button></div></div><div className="mt-6 overflow-hidden rounded-xl border border-surface-border bg-surface"><div className="border-b border-surface-border p-4 text-sm font-semibold">Documentos do lote</div>{itens.length === 0 ? <p className="p-5 text-sm text-gray-400">Nenhum documento pendente neste lote.</p> : itens.map(item => <div key={`${item.tipo}-${item.id}`} className="flex flex-col gap-3 border-b border-surface-border p-4 last:border-0 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">{item.nome}</p><p className="mt-1 text-sm text-gray-400">{item.referencia}{item.valor !== null ? ` · ${Number(item.valor).toLocaleString('pt-BR', { style:'currency', currency:'BRL' })}` : ''}</p></div><div className="flex flex-wrap gap-2"><button className="rounded-lg border border-surface-border px-3 py-2 text-xs" onClick={() => { setDocumentoFinanceiroTipo(item.tipo); setDocumentoFinanceiroId(String(item.id)); void carregarAnexosFinanceiros(item.tipo, String(item.id)) }}>Visualizar documentos</button><button className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60" disabled={itemCentralProcessando === `${item.tipo}-${item.id}`} onClick={() => void aprovarItemPendente(item)}>{itemCentralProcessando === `${item.tipo}-${item.id}` ? 'Autorizando…' : 'Autorizar'}</button></div></div>)}</div></>})()}</section>}
+          {perfil.perfil === "supervisor" &&
+            pagina === "supervisor_lote" &&
+            loteSupervisorId !== null && (
+              <section className="mx-auto max-w-7xl py-4">
+                {(() => {
+                  const lote = lotesWeb.find(
+                    (item) => item.id === loteSupervisorId,
+                  );
+                  const itens = itensSupervisorPendentes.filter(
+                    (item) => item.lote_id === loteSupervisorId,
+                  );
+                  return (
+                    <>
+                      <button
+                        className="text-sm text-brand-300"
+                        onClick={() => navegar("supervisor_obra")}
+                      >
+                        ← Voltar aos lotes
+                      </button>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h2 className="text-2xl font-bold">
+                            {lote?.titulo ?? "Lote"}
+                          </h2>
+                          <p className="mt-1 text-sm text-gray-400">
+                            Autorizações de pagamento e notas fiscais enviadas
+                            pelo Administrador.
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => lote && imprimirResumoLote(lote)} className="rounded-lg border border-surface-border px-3 py-2 text-sm">
+                            Gerar capa
+                          </button>
+                          <button onClick={() => lote && exportarLoteSupervisor(lote)} className="rounded-lg border border-surface-border px-3 py-2 text-sm">
+                            Exportar lote
+                          </button>
+                        </div>
+                      </div>
+                      <div className="mt-6 overflow-hidden rounded-xl border border-surface-border bg-surface">
+                        <div className="border-b border-surface-border p-4 text-sm font-semibold">
+                          Documentos do lote
+                        </div>
+                        {itens.length === 0 ? (
+                          <p className="p-5 text-sm text-gray-400">
+                            Nenhum documento pendente neste lote.
+                          </p>
+                        ) : (
+                          itens.map((item) => (
+                            <div
+                              key={`${item.tipo}-${item.id}`}
+                              className="flex flex-col gap-3 border-b border-surface-border p-4 last:border-0 sm:flex-row sm:items-center sm:justify-between"
+                            >
+                              <div>
+                                <p className="font-semibold">{item.nome}</p>
+                                <p className="mt-1 text-sm text-gray-400">
+                                  {item.referencia}
+                                  {item.valor !== null
+                                    ? ` · ${Number(item.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  className="rounded-lg border border-surface-border px-3 py-2 text-xs"
+                                  onClick={() => {
+                                    setDocumentoFinanceiroTipo(item.tipo);
+                                    setDocumentoFinanceiroId(String(item.id));
+                                    void carregarAnexosFinanceiros(
+                                      item.tipo,
+                                      String(item.id),
+                                    );
+                                  }}
+                                >
+                                  Visualizar documentos
+                                </button>
+                                <button
+                                  className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-medium disabled:opacity-60"
+                                  disabled={
+                                    itemCentralProcessando ===
+                                    `${item.tipo}-${item.id}`
+                                  }
+                                  onClick={() => void aprovarItemPendente(item)}
+                                >
+                                  {itemCentralProcessando ===
+                                  `${item.tipo}-${item.id}`
+                                    ? "Autorizando…"
+                                    : "Autorizar"}
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+              </section>
+            )}
           {perfil.perfil === "supervisor" &&
             pagina === "supervisor_estados" &&
             resumoSupervisor && (
@@ -3050,9 +3213,13 @@ function PortalWeb() {
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                   {[
                     ...new Set(
-                      resumoSupervisor.obras.filter(obra => `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`.toLowerCase().includes(buscaGeral.toLowerCase())).map(
-                        (obra) => obra.estado || "Sem estado",
-                      ),
+                      resumoSupervisor.obras
+                        .filter((obra) =>
+                          `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`
+                            .toLowerCase()
+                            .includes(buscaGeral.toLowerCase()),
+                        )
+                        .map((obra) => obra.estado || "Sem estado"),
                     ),
                   ].map((estado) => (
                     <button
@@ -3115,18 +3282,31 @@ function PortalWeb() {
                             Programação financeira
                           </p>
                           {lotesWeb.filter(
-                            (lote) => lote.empresa_id === obra.id && lote.titulo.toLowerCase().includes(buscaGeral.toLowerCase()),
+                            (lote) =>
+                              lote.empresa_id === obra.id &&
+                              lote.titulo
+                                .toLowerCase()
+                                .includes(buscaGeral.toLowerCase()),
                           ).length === 0 ? (
                             <p className="mt-2 text-sm text-gray-400">
                               Nenhum lote enviado para esta obra.
                             </p>
                           ) : (
                             lotesWeb
-                              .filter((lote) => lote.empresa_id === obra.id && lote.titulo.toLowerCase().includes(buscaGeral.toLowerCase()))
+                              .filter(
+                                (lote) =>
+                                  lote.empresa_id === obra.id &&
+                                  lote.titulo
+                                    .toLowerCase()
+                                    .includes(buscaGeral.toLowerCase()),
+                              )
                               .map((lote) => (
                                 <button
                                   key={lote.id}
-                                  onClick={() => { setLoteSupervisorId(lote.id); navegar("supervisor_lote") }}
+                                  onClick={() => {
+                                    setLoteSupervisorId(lote.id);
+                                    navegar("supervisor_lote");
+                                  }}
                                   className="mt-2 block w-full rounded-lg bg-surface-card p-3 text-left text-sm hover:bg-surface-hover"
                                 >
                                   <strong>{lote.titulo}</strong>
@@ -3137,16 +3317,133 @@ function PortalWeb() {
                                         ).toLocaleDateString("pt-BR")
                                       : ""}
                                   </span>
-                                  <span className={itensSupervisorPendentes.some(item => item.lote_id === lote.id) ? "ml-2 rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300" : "ml-2 rounded-full bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300"}>{itensSupervisorPendentes.some(item => item.lote_id === lote.id) ? "Pendente" : "Concluído"}</span>
+                                  <span
+                                    className={
+                                      itensSupervisorPendentes.some(
+                                        (item) => item.lote_id === lote.id,
+                                      )
+                                        ? "ml-2 rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-300"
+                                        : "ml-2 rounded-full bg-emerald-500/15 px-2 py-1 text-xs text-emerald-300"
+                                    }
+                                  >
+                                    {itensSupervisorPendentes.some(
+                                      (item) => item.lote_id === lote.id,
+                                    )
+                                      ? "Pendente"
+                                      : "Concluído"}
+                                  </span>
                                 </button>
                               ))
                           )}
                         </div>
                         <div className="mt-5 rounded-xl border border-surface-border bg-[#1f2d46] p-4">
-                          <div className="flex items-center gap-2"><Boxes size={16} className="text-brand-300" /><p className="text-sm font-semibold">Estoque</p></div>
-                          {(() => { const estoque = produtosWeb.filter(item => item.empresa_id === obra.id); const zerados = estoque.filter(item => Number(item.estoque_atual) <= 0); const baixos = estoque.filter(item => Number(item.estoque_atual) > 0 && Number(item.estoque_atual) <= Number(item.estoque_minimo)); const valor = estoque.reduce((total, item) => total + Number(item.estoque_atual) * Number(item.valor_unitario), 0); return <div className="mt-4 grid gap-3 md:grid-cols-3"><div className="rounded-lg border border-red-500/35 bg-red-500/10 p-3"><p className="text-sm font-semibold">Estoque Zerado</p><p className="mt-1 text-xs text-gray-400">{zerados.length ? `${zerados.length} item(ns) zerado(s).` : 'Nenhum material/ferramenta zerado.'}</p></div><div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3"><p className="text-sm font-semibold">Estoque Acabando</p><p className="mt-1 text-xs text-gray-400">{baixos.length ? `${baixos.length} item(ns) abaixo do mínimo.` : 'Nenhum material/ferramenta acabando.'}</p></div><div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-3"><p className="text-sm font-semibold">Valor total do estoque</p><p className="mt-2 text-xl font-bold text-emerald-300">{valor.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</p></div></div> })()}
-                          <input aria-label="Buscar no estoque" value={buscaProduto} onChange={e => setBuscaProduto(e.target.value)} className="mt-3 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Buscar por código ou nome..." />
-                          <div className="mt-3 divide-y divide-surface-border rounded-lg border border-surface-border">{produtosWeb.filter(item => item.empresa_id === obra.id && `${item.codigo} ${item.nome}`.toLowerCase().includes(buscaProduto.toLowerCase())).length === 0 ? <p className="p-5 text-center text-sm text-gray-400">Nenhum material/ferramenta encontrado nessa obra.</p> : produtosWeb.filter(item => item.empresa_id === obra.id && `${item.codigo} ${item.nome}`.toLowerCase().includes(buscaProduto.toLowerCase())).map(item => <div key={item.id} className="flex items-center justify-between gap-3 p-3 text-sm"><span><strong>{item.nome}</strong><small className="ml-2 text-gray-400">{item.codigo}</small></span><span>{Number(item.estoque_atual)} {item.unidade ?? 'un'}</span></div>)}</div>
+                          <div className="flex items-center gap-2">
+                            <Boxes size={16} className="text-brand-300" />
+                            <p className="text-sm font-semibold">Estoque</p>
+                          </div>
+                          {(() => {
+                            const estoque = produtosWeb.filter(
+                              (item) => item.empresa_id === obra.id,
+                            );
+                            const zerados = estoque.filter(
+                              (item) => Number(item.estoque_atual) <= 0,
+                            );
+                            const baixos = estoque.filter(
+                              (item) =>
+                                Number(item.estoque_atual) > 0 &&
+                                Number(item.estoque_atual) <=
+                                  Number(item.estoque_minimo),
+                            );
+                            const valor = estoque.reduce(
+                              (total, item) =>
+                                total +
+                                Number(item.estoque_atual) *
+                                  Number(item.valor_unitario),
+                              0,
+                            );
+                            return (
+                              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                                <div className="rounded-lg border border-red-500/35 bg-red-500/10 p-3">
+                                  <p className="text-sm font-semibold">
+                                    Estoque Zerado
+                                  </p>
+                                  <p className="mt-1 text-xs text-gray-400">
+                                    {zerados.length
+                                      ? `${zerados.length} item(ns) zerado(s).`
+                                      : "Nenhum material/ferramenta zerado."}
+                                  </p>
+                                </div>
+                                <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3">
+                                  <p className="text-sm font-semibold">
+                                    Estoque Acabando
+                                  </p>
+                                  <p className="mt-1 text-xs text-gray-400">
+                                    {baixos.length
+                                      ? `${baixos.length} item(ns) abaixo do mínimo.`
+                                      : "Nenhum material/ferramenta acabando."}
+                                  </p>
+                                </div>
+                                <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 p-3">
+                                  <p className="text-sm font-semibold">
+                                    Valor total do estoque
+                                  </p>
+                                  <p className="mt-2 text-xl font-bold text-emerald-300">
+                                    {valor.toLocaleString("pt-BR", {
+                                      style: "currency",
+                                      currency: "BRL",
+                                    })}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                          <input
+                            aria-label="Buscar no estoque"
+                            value={buscaProduto}
+                            onChange={(e) => setBuscaProduto(e.target.value)}
+                            className="mt-3 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white"
+                            placeholder="Buscar por código ou nome..."
+                          />
+                          <div className="mt-3 divide-y divide-surface-border rounded-lg border border-surface-border">
+                            {produtosWeb.filter(
+                              (item) =>
+                                item.empresa_id === obra.id &&
+                                `${item.codigo} ${item.nome}`
+                                  .toLowerCase()
+                                  .includes(buscaProduto.toLowerCase()),
+                            ).length === 0 ? (
+                              <p className="p-5 text-center text-sm text-gray-400">
+                                Nenhum material/ferramenta encontrado nessa
+                                obra.
+                              </p>
+                            ) : (
+                              produtosWeb
+                                .filter(
+                                  (item) =>
+                                    item.empresa_id === obra.id &&
+                                    `${item.codigo} ${item.nome}`
+                                      .toLowerCase()
+                                      .includes(buscaProduto.toLowerCase()),
+                                )
+                                .map((item) => (
+                                  <div
+                                    key={item.id}
+                                    className="flex items-center justify-between gap-3 p-3 text-sm"
+                                  >
+                                    <span>
+                                      <strong>{item.nome}</strong>
+                                      <small className="ml-2 text-gray-400">
+                                        {item.codigo}
+                                      </small>
+                                    </span>
+                                    <span>
+                                      {Number(item.estoque_atual)}{" "}
+                                      {item.unidade ?? "un"}
+                                    </span>
+                                  </div>
+                                ))
+                            )}
+                          </div>
                         </div>
                       </article>
                     ))}
@@ -3162,7 +3459,24 @@ function PortalWeb() {
                     VISÃO GERAL
                   </p>
                   <h2 className="mt-1 text-2xl font-bold">Suas obras</h2>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-300"><span className="font-semibold text-gray-400">PERÍODO</span><input aria-label="Data inicial" type="date" value={periodoInicial} onChange={e => setPeriodoInicial(e.target.value)} className="rounded-lg border border-surface-border bg-surface-card px-2 py-1.5" /><span>até</span><input aria-label="Data final" type="date" value={periodoFinal} onChange={e => setPeriodoFinal(e.target.value)} className="rounded-lg border border-surface-border bg-surface-card px-2 py-1.5" /></div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-gray-300">
+                    <span className="font-semibold text-gray-400">PERÍODO</span>
+                    <input
+                      aria-label="Data inicial"
+                      type="date"
+                      value={periodoInicial}
+                      onChange={(e) => setPeriodoInicial(e.target.value)}
+                      className="rounded-lg border border-surface-border bg-surface-card px-2 py-1.5"
+                    />
+                    <span>até</span>
+                    <input
+                      aria-label="Data final"
+                      type="date"
+                      value={periodoFinal}
+                      onChange={(e) => setPeriodoFinal(e.target.value)}
+                      className="rounded-lg border border-surface-border bg-surface-card px-2 py-1.5"
+                    />
+                  </div>
                   <p className="mt-1 text-sm text-gray-400">
                     Acompanhamento consolidado das obras sob sua gestão.
                   </p>
@@ -3257,30 +3571,36 @@ function PortalWeb() {
                           Nenhuma obra vinculada a este supervisor.
                         </p>
                       ) : (
-                        resumoSupervisor.obras.filter(obra => `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`.toLowerCase().includes(buscaGeral.toLowerCase())).map((obra) => (
-                          <div
-                            key={obra.id}
-                            className="flex items-center justify-between gap-4 py-4"
-                          >
-                            <div className="flex min-w-0 items-center gap-3">
-                              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-500/10 text-brand-300">
-                                <MapPin size={16} />
-                              </span>
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">
-                                  {obra.titulo_obra || obra.nome}
-                                </p>
-                                <p className="truncate text-xs text-gray-400">
-                                  {obra.nome}
-                                  {obra.estado ? ` · ${obra.estado}` : ""}
-                                </p>
+                        resumoSupervisor.obras
+                          .filter((obra) =>
+                            `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`
+                              .toLowerCase()
+                              .includes(buscaGeral.toLowerCase()),
+                          )
+                          .map((obra) => (
+                            <div
+                              key={obra.id}
+                              className="flex items-center justify-between gap-4 py-4"
+                            >
+                              <div className="flex min-w-0 items-center gap-3">
+                                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-brand-500/10 text-brand-300">
+                                  <MapPin size={16} />
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="truncate font-medium">
+                                    {obra.titulo_obra || obra.nome}
+                                  </p>
+                                  <p className="truncate text-xs text-gray-400">
+                                    {obra.nome}
+                                    {obra.estado ? ` · ${obra.estado}` : ""}
+                                  </p>
+                                </div>
                               </div>
+                              <span className="shrink-0 rounded-full bg-surface-hover px-2.5 py-1 text-xs text-gray-300">
+                                {obra.estado || "Sem estado"}
+                              </span>
                             </div>
-                            <span className="shrink-0 rounded-full bg-surface-hover px-2.5 py-1 text-xs text-gray-300">
-                              {obra.estado || "Sem estado"}
-                            </span>
-                          </div>
-                        ))
+                          ))
                       )}
                     </div>
                   </section>
@@ -5210,7 +5530,41 @@ function PortalWeb() {
                 serie={serieSupervisor}
               />
             )}
-          {perfil.perfil === "supervisor" && pagina === "supervisor" && resumoSupervisor && <section className="mx-auto max-w-7xl pb-7"><p className="mb-3 text-xs font-bold uppercase tracking-widest text-brand-300">Obras acompanhadas</p><div className="space-y-2">{resumoSupervisor.obras.filter(obra => `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`.toLowerCase().includes(buscaGeral.toLowerCase())).map(obra => <button key={obra.id} onClick={() => { setEstadoSupervisor(obra.estado || "Sem estado"); navegar("supervisor_obra") }} className="flex w-full items-center justify-between rounded-xl border border-surface-border bg-surface p-4 text-left hover:border-brand-500"><span><strong>{obra.titulo_obra || obra.nome}</strong><small className="ml-2 text-gray-400">{obra.estado || "Sem estado"}</small></span><span className="text-brand-300">Abrir →</span></button>)}</div></section>}
+          {perfil.perfil === "supervisor" &&
+            pagina === "supervisor" &&
+            resumoSupervisor && (
+              <section className="mx-auto max-w-7xl pb-7">
+                <p className="mb-3 text-xs font-bold uppercase tracking-widest text-brand-300">
+                  Obras acompanhadas
+                </p>
+                <div className="space-y-2">
+                  {resumoSupervisor.obras
+                    .filter((obra) =>
+                      `${obra.nome} ${obra.titulo_obra ?? ""} ${obra.estado ?? ""}`
+                        .toLowerCase()
+                        .includes(buscaGeral.toLowerCase()),
+                    )
+                    .map((obra) => (
+                      <button
+                        key={obra.id}
+                        onClick={() => {
+                          setEstadoSupervisor(obra.estado || "Sem estado");
+                          navegar("supervisor_obra");
+                        }}
+                        className="flex w-full items-center justify-between rounded-xl border border-surface-border bg-surface p-4 text-left hover:border-brand-500"
+                      >
+                        <span>
+                          <strong>{obra.titulo_obra || obra.nome}</strong>
+                          <small className="ml-2 text-gray-400">
+                            {obra.estado || "Sem estado"}
+                          </small>
+                        </span>
+                        <span className="text-brand-300">Abrir →</span>
+                      </button>
+                    ))}
+                </div>
+              </section>
+            )}
           {perfil.perfil === "supervisor" && pagina === "supervisor" && (
             <section className="mx-auto max-w-7xl pb-7">
               <div className="rounded-2xl border border-surface-border bg-surface p-5">
@@ -5429,7 +5783,47 @@ function PortalWeb() {
               </div>
             </section>
           )}
-          {perfil.perfil === "supervisor" && pagina === "supervisor_configuracoes" && <section className="mx-auto max-w-7xl pb-7"><div className="rounded-xl border border-surface-border bg-surface p-4"><h3 className="font-semibold">Dados de acesso</h3><p className="mt-1 text-sm text-gray-400">Ao alterar o e-mail, o Supabase enviará uma confirmação para o novo endereço.</p><div className="mt-4 grid gap-3 md:grid-cols-2"><label className="text-sm text-gray-300">Novo e-mail<input type="email" value={novoEmailConta} onChange={e => setNovoEmailConta(e.target.value)} className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-white" placeholder={perfil.email} /></label><label className="text-sm text-gray-300">Nova senha<input type="password" value={novaSenhaConta} onChange={e => setNovaSenhaConta(e.target.value)} className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-white" minLength={6} placeholder="Mínimo de 6 caracteres" /></label></div><button onClick={() => void alterarConta()} className="mt-4 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium">Salvar dados de acesso</button></div></section>}
+          {perfil.perfil === "supervisor" &&
+            pagina === "supervisor_configuracoes" && (
+              <section className="mx-auto max-w-7xl pb-7">
+                <div className="rounded-xl border border-surface-border bg-surface p-4">
+                  <h3 className="font-semibold">Dados de acesso</h3>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Ao alterar o e-mail, o Supabase enviará uma confirmação para
+                    o novo endereço.
+                  </p>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="text-sm text-gray-300">
+                      Novo e-mail
+                      <input
+                        type="email"
+                        value={novoEmailConta}
+                        onChange={(e) => setNovoEmailConta(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-white"
+                        placeholder={perfil.email}
+                      />
+                    </label>
+                    <label className="text-sm text-gray-300">
+                      Nova senha
+                      <input
+                        type="password"
+                        value={novaSenhaConta}
+                        onChange={(e) => setNovaSenhaConta(e.target.value)}
+                        className="mt-1 w-full rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-white"
+                        minLength={6}
+                        placeholder="Mínimo de 6 caracteres"
+                      />
+                    </label>
+                  </div>
+                  <button
+                    onClick={() => void alterarConta()}
+                    className="mt-4 rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium"
+                  >
+                    Salvar dados de acesso
+                  </button>
+                </div>
+              </section>
+            )}
           {pagina === "ap" && perfil.perfil === "admin" && (
             <section className="mx-auto max-w-[1180px] pb-7">
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-surface-border bg-surface p-4">
