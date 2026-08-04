@@ -229,7 +229,17 @@ type ItemCentral = {
   referencia: string;
   valor: number | null;
 };
-type OpcaoFinanceira = { id: number; nome: string };
+type OpcaoFinanceira = {
+  id: number;
+  nome: string;
+  tipo?: string;
+  saldo?: number;
+  banco?: string | null;
+  agencia?: string | null;
+  numero?: string | null;
+  ativo?: number;
+  cor?: string;
+};
 
 const nomesPerfil: Record<string, string> = {
   admin: "Administrador",
@@ -526,6 +536,26 @@ function PortalWeb() {
   const [salvandoRespostaPessoal, setSalvandoRespostaPessoal] = useState(false);
   const [categoriasWeb, setCategoriasWeb] = useState<OpcaoFinanceira[]>([]);
   const [contasWeb, setContasWeb] = useState<OpcaoFinanceira[]>([]);
+  const [gerenciandoFinanceiro, setGerenciandoFinanceiro] = useState(false);
+  const [salvandoOpcaoFinanceira, setSalvandoOpcaoFinanceira] =
+    useState(false);
+  const [editandoContaId, setEditandoContaId] = useState<number | null>(null);
+  const [editandoCategoriaId, setEditandoCategoriaId] = useState<
+    number | null
+  >(null);
+  const [formConta, setFormConta] = useState({
+    nome: "",
+    tipo: "corrente",
+    saldo: "0",
+    banco: "",
+    agencia: "",
+    numero: "",
+  });
+  const [formCategoria, setFormCategoria] = useState({
+    nome: "",
+    tipo: "ambos",
+    cor: "#2563eb",
+  });
   const [pagina, setPagina] = useState<
     | "inicio"
     | "financeiro"
@@ -1323,12 +1353,12 @@ function PortalWeb() {
         const [categorias, contas] = await Promise.all([
           supabase
             .from("categorias")
-            .select("id,nome")
+            .select("id,nome,tipo,cor,ativo")
             .eq("empresa_id", data.empresa_id)
             .order("nome"),
           supabase
             .from("contas")
-            .select("id,nome")
+            .select("id,nome,tipo,saldo,banco,agencia,numero,ativo")
             .eq("empresa_id", data.empresa_id)
             .order("nome"),
         ]);
@@ -1444,6 +1474,124 @@ function PortalWeb() {
     setExcluindoLancamentoId(null);
     if (error) {
       setErro(`Não foi possível excluir o lançamento: ${error.message}`);
+      return;
+    }
+    await carregarPerfil(session);
+  }
+
+  async function salvarConta(evento: FormEvent) {
+    evento.preventDefault();
+    if (!perfil || !session) return;
+    if (!formConta.nome.trim()) {
+      setErro("Informe o nome da conta.");
+      return;
+    }
+    setErro("");
+    setSalvandoOpcaoFinanceira(true);
+    const dados = {
+      empresa_id: perfil.empresa_id,
+      nome: formConta.nome.trim(),
+      tipo: formConta.tipo,
+      saldo: Number(formConta.saldo || 0),
+      banco: formConta.banco.trim(),
+      agencia: formConta.agencia.trim(),
+      numero: formConta.numero.trim(),
+      ativo: 1,
+    };
+    const { error } = editandoContaId
+      ? await supabase.rpc("atualizar_conta", {
+          p: { ...dados, id: editandoContaId },
+        })
+      : await supabase.rpc("criar_conta", { p: dados });
+    setSalvandoOpcaoFinanceira(false);
+    if (error) {
+      setErro(`Não foi possível salvar a conta: ${error.message}`);
+      return;
+    }
+    setEditandoContaId(null);
+    setFormConta({
+      nome: "",
+      tipo: "corrente",
+      saldo: "0",
+      banco: "",
+      agencia: "",
+      numero: "",
+    });
+    await carregarPerfil(session);
+  }
+
+  async function salvarCategoria(evento: FormEvent) {
+    evento.preventDefault();
+    if (!perfil || !session) return;
+    if (!formCategoria.nome.trim()) {
+      setErro("Informe o nome da categoria.");
+      return;
+    }
+    setErro("");
+    setSalvandoOpcaoFinanceira(true);
+    const dados = {
+      empresa_id: perfil.empresa_id,
+      nome: formCategoria.nome.trim(),
+      tipo: formCategoria.tipo,
+      cor: formCategoria.cor,
+    };
+    const { error } = editandoCategoriaId
+      ? await supabase.rpc("atualizar_categoria", {
+          p: { ...dados, id: editandoCategoriaId },
+        })
+      : await supabase.rpc("criar_categoria", { p: dados });
+    setSalvandoOpcaoFinanceira(false);
+    if (error) {
+      setErro(`Não foi possível salvar a categoria: ${error.message}`);
+      return;
+    }
+    setEditandoCategoriaId(null);
+    setFormCategoria({ nome: "", tipo: "ambos", cor: "#2563eb" });
+    await carregarPerfil(session);
+  }
+
+  function editarConta(item: OpcaoFinanceira) {
+    setEditandoContaId(item.id);
+    setFormConta({
+      nome: item.nome,
+      tipo: item.tipo ?? "corrente",
+      saldo: String(item.saldo ?? 0),
+      banco: item.banco ?? "",
+      agencia: item.agencia ?? "",
+      numero: item.numero ?? "",
+    });
+  }
+
+  function editarCategoria(item: OpcaoFinanceira) {
+    setEditandoCategoriaId(item.id);
+    setFormCategoria({
+      nome: item.nome,
+      tipo: item.tipo ?? "ambos",
+      cor: item.cor ?? "#2563eb",
+    });
+  }
+
+  async function excluirConta(item: OpcaoFinanceira) {
+    if (!session || !window.confirm(`Excluir a conta “${item.nome}”?`)) return;
+    const { error } = await supabase.rpc("excluir_conta", { p_id: item.id });
+    if (error) {
+      setErro(`Não foi possível excluir a conta: ${error.message}`);
+      return;
+    }
+    await carregarPerfil(session);
+  }
+
+  async function excluirCategoria(item: OpcaoFinanceira) {
+    if (
+      !session ||
+      !window.confirm(`Excluir a categoria “${item.nome}”?`)
+    )
+      return;
+    const { error } = await supabase.rpc("excluir_categoria", {
+      p_id: item.id,
+    });
+    if (error) {
+      setErro(`Não foi possível excluir a categoria: ${error.message}`);
       return;
     }
     await carregarPerfil(session);
@@ -4344,6 +4492,14 @@ function PortalWeb() {
                     </p>
                   </div>
                   {perfil.perfil === "admin" && (
+                    <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-surface-border px-4 py-2.5 text-sm font-medium hover:bg-surface-hover"
+                      onClick={() => setGerenciandoFinanceiro((aberto) => !aberto)}
+                    >
+                      {gerenciandoFinanceiro ? "Fechar cadastros" : "Contas e categorias"}
+                    </button>
                     <button
                       className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-medium hover:bg-brand-500"
                       onClick={() => {
@@ -4353,6 +4509,7 @@ function PortalWeb() {
                     >
                       {novoLancamento ? "Cancelar" : "+ Novo lançamento"}
                     </button>
+                    </div>
                   )}
                 </div>
                 <div className="mb-5 grid gap-3 sm:grid-cols-3">
@@ -4387,6 +4544,107 @@ function PortalWeb() {
                     </p>
                   </div>
                 </div>
+                {perfil.perfil === "admin" && gerenciandoFinanceiro && (
+                  <section className="mb-5 grid gap-4 xl:grid-cols-2">
+                    <form
+                      onSubmit={salvarConta}
+                      className="rounded-xl border border-surface-border bg-surface p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-semibold">
+                          {editandoContaId ? "Editar conta" : "Nova conta"}
+                        </h3>
+                        {editandoContaId && (
+                          <button
+                            type="button"
+                            className="text-xs text-gray-400 hover:text-white"
+                            onClick={() => {
+                              setEditandoContaId(null);
+                              setFormConta({ nome: "", tipo: "corrente", saldo: "0", banco: "", agencia: "", numero: "" });
+                            }}
+                          >
+                            Cancelar edição
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <input
+                          className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white sm:col-span-2"
+                          placeholder="Nome da conta"
+                          value={formConta.nome}
+                          onChange={(e) => setFormConta({ ...formConta, nome: e.target.value })}
+                          required
+                        />
+                        <select
+                          className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white"
+                          value={formConta.tipo}
+                          onChange={(e) => setFormConta({ ...formConta, tipo: e.target.value })}
+                        >
+                          <option value="corrente">Conta corrente</option>
+                          <option value="poupanca">Poupança</option>
+                          <option value="caixa">Caixa</option>
+                        </select>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white"
+                          placeholder="Saldo inicial"
+                          value={formConta.saldo}
+                          onChange={(e) => setFormConta({ ...formConta, saldo: e.target.value })}
+                        />
+                        <input className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Banco" value={formConta.banco} onChange={(e) => setFormConta({ ...formConta, banco: e.target.value })} />
+                        <input className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Agência" value={formConta.agencia} onChange={(e) => setFormConta({ ...formConta, agencia: e.target.value })} />
+                        <input className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white sm:col-span-2" placeholder="Número da conta" value={formConta.numero} onChange={(e) => setFormConta({ ...formConta, numero: e.target.value })} />
+                      </div>
+                      <button disabled={salvandoOpcaoFinanceira} className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60">
+                        {salvandoOpcaoFinanceira ? "Salvando…" : editandoContaId ? "Salvar conta" : "Criar conta"}
+                      </button>
+                      <div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">
+                        {contasWeb.map((item) => (
+                          <div key={item.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                            <div><p className="font-medium">{item.nome}</p><p className="text-xs text-gray-400">{item.tipo ?? "corrente"} · {Number(item.saldo ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</p></div>
+                            <div className="flex gap-2"><button type="button" className="text-xs text-brand-300" onClick={() => editarConta(item)}>Editar</button><button type="button" className="text-xs text-red-300" onClick={() => void excluirConta(item)}>Excluir</button></div>
+                          </div>
+                        ))}
+                        {contasWeb.length === 0 && <p className="p-3 text-sm text-gray-400">Nenhuma conta cadastrada.</p>}
+                      </div>
+                    </form>
+                    <form
+                      onSubmit={salvarCategoria}
+                      className="rounded-xl border border-surface-border bg-surface p-4"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-semibold">
+                          {editandoCategoriaId ? "Editar categoria" : "Nova categoria"}
+                        </h3>
+                        {editandoCategoriaId && (
+                          <button type="button" className="text-xs text-gray-400 hover:text-white" onClick={() => { setEditandoCategoriaId(null); setFormCategoria({ nome: "", tipo: "ambos", cor: "#2563eb" }); }}>
+                            Cancelar edição
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_150px_72px]">
+                        <input className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" placeholder="Nome da categoria" value={formCategoria.nome} onChange={(e) => setFormCategoria({ ...formCategoria, nome: e.target.value })} required />
+                        <select className="rounded-lg border border-surface-border bg-surface-card px-3 py-2 text-sm text-white" value={formCategoria.tipo} onChange={(e) => setFormCategoria({ ...formCategoria, tipo: e.target.value })}>
+                          <option value="ambos">Receita e despesa</option><option value="receita">Receita</option><option value="despesa">Despesa</option>
+                        </select>
+                        <input aria-label="Cor da categoria" type="color" className="h-10 w-full rounded-lg border border-surface-border bg-surface-card p-1" value={formCategoria.cor} onChange={(e) => setFormCategoria({ ...formCategoria, cor: e.target.value })} />
+                      </div>
+                      <button disabled={salvandoOpcaoFinanceira} className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium disabled:opacity-60">
+                        {salvandoOpcaoFinanceira ? "Salvando…" : editandoCategoriaId ? "Salvar categoria" : "Criar categoria"}
+                      </button>
+                      <div className="mt-4 divide-y divide-surface-border rounded-lg border border-surface-border">
+                        {categoriasWeb.map((item) => (
+                          <div key={item.id} className="flex items-center justify-between gap-3 p-3 text-sm">
+                            <div className="flex items-center gap-2"><i className="h-3 w-3 rounded-full" style={{ background: item.cor ?? "#2563eb" }} /><div><p className="font-medium">{item.nome}</p><p className="text-xs text-gray-400">{item.tipo ?? "ambos"}</p></div></div>
+                            <div className="flex gap-2"><button type="button" className="text-xs text-brand-300" onClick={() => editarCategoria(item)}>Editar</button><button type="button" className="text-xs text-red-300" onClick={() => void excluirCategoria(item)}>Excluir</button></div>
+                          </div>
+                        ))}
+                        {categoriasWeb.length === 0 && <p className="p-3 text-sm text-gray-400">Nenhuma categoria cadastrada.</p>}
+                      </div>
+                    </form>
+                  </section>
+                )}
                 {novoLancamento && (
                   <form
                     onSubmit={salvarLancamento}
