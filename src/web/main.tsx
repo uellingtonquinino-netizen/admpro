@@ -2100,6 +2100,61 @@ function PortalWeb() {
     janela.print();
   }
 
+  function itensDoLoteAdministrativo(loteId: number) {
+    return [
+      ...autorizacoesWeb
+        .filter((item) => item.lote_id === loteId)
+        .map((item) => ({
+          tipo: "AP",
+          nome: item.beneficiario_nome,
+          referencia: item.descricao ?? "Autorização de pagamento",
+          valor: item.valor,
+        })),
+      ...notasFiscaisWeb
+        .filter((item) => item.lote_id === loteId)
+        .map((item) => ({
+          tipo: "NF",
+          nome: item.fornecedor_nome,
+          referencia: `NF ${item.numero_nf ?? "—"}`,
+          valor: item.valor_total,
+        })),
+    ];
+  }
+
+  function exportarLoteAdministrativo(lote: LoteWeb) {
+    const itens = itensDoLoteAdministrativo(lote.id);
+    const linhas = [
+      "Tipo;Beneficiário/Fornecedor;Referência;Valor",
+      ...itens.map(
+        (item) =>
+          `${item.tipo};${item.nome};${item.referencia};${item.valor.toFixed(2)}`,
+      ),
+    ];
+    const url = URL.createObjectURL(
+      new Blob([linhas.join("\n")], { type: "text/csv;charset=utf-8" }),
+    );
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${lote.titulo.replace(/[^a-z0-9]+/gi, "-")}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function imprimirLoteAdministrativo(lote: LoteWeb) {
+    const itens = itensDoLoteAdministrativo(lote.id);
+    const janela = window.open("", "_blank", "noopener");
+    if (!janela) {
+      setErro("Permita pop-ups para imprimir o lote.");
+      return;
+    }
+    janela.document.write(
+      `<html><head><title>${lote.titulo}</title><style>body{font-family:Arial;padding:32px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #bbb;padding:8px;text-align:left}</style></head><body><h1>${lote.titulo}</h1><p>Resumo de lote financeiro</p><table><thead><tr><th>Tipo</th><th>Beneficiário/Fornecedor</th><th>Referência</th><th>Valor</th></tr></thead><tbody>${itens.map((item) => `<tr><td>${item.tipo}</td><td>${item.nome}</td><td>${item.referencia}</td><td>${item.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</td></tr>`).join("")}</tbody></table></body></html>`,
+    );
+    janela.document.close();
+    janela.focus();
+    janela.print();
+  }
+
   function imprimirRelatorioGestor() {
     const janela = window.open("", "_blank", "noopener");
     if (!janela) {
@@ -6836,6 +6891,22 @@ function PortalWeb() {
                                   : "Enviar ao Supervisor"}
                               </button>
                             )}
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="rounded-lg border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                              onClick={() => imprimirLoteAdministrativo(lote)}
+                            >
+                              Imprimir resumo
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-lg border border-surface-border px-3 py-1.5 text-xs hover:bg-surface-hover"
+                              onClick={() => exportarLoteAdministrativo(lote)}
+                            >
+                              Exportar CSV
+                            </button>
                           </div>
                         </article>
                       ))
