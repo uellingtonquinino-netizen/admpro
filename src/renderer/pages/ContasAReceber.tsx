@@ -142,7 +142,7 @@ export default function ContasAReceber() {
           description="Ajuste os filtros acima, ou lance uma receita para ver as contas a receber aqui."
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">

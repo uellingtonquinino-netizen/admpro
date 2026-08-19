@@ -41,4 +41,5 @@ export const PERMISSOES_SISTEMA: PermissaoSistema[] = [
   { chave: 'lotes-enviados',         label: 'Lotes Enviados',                    perfisPadrao: ['admin'] },
   { chave: 'fechar-lote-nao-autorizado', label: 'Fechar Lote com AP/Nota não autorizada', perfisPadrao: [] },
   { chave: 'apagar-lote', label: 'Apagar Lote', perfisPadrao: [] },
+  { chave: 'aprovar-documentos', label: 'Aprovar AP\'s e Notas Fiscais', perfisPadrao: [] },
 ]

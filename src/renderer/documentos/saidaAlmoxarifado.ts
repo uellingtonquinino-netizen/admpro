@@ -1,13 +1,17 @@
 import { documentoBase, cabecalhoComLogo, fmtData, hoje } from './base'
 
+export interface ItemSaidaAlmoxarifado {
+  produtoCodigo: string
+  produtoNome:   string
+  quantidade:    number
+  unidade?:      string | null
+}
+
 export interface DadosSaidaAlmoxarifado {
   logoUrl?:          string | null
   empresaNome:       string
   data:              string
-  produtoCodigo:     string
-  produtoNome:       string
-  quantidade:        number
-  unidade?:          string | null
+  itens:             ItemSaidaAlmoxarifado[]
   retiradoPorNome:   string
   setor?:            string | null
   solicitadoPorNome?: string | null
@@ -15,6 +19,14 @@ export interface DadosSaidaAlmoxarifado {
 }
 
 export function gerarHtmlSaidaAlmoxarifado(dados: DadosSaidaAlmoxarifado): string {
+  const linhasItens = dados.itens.map(it => `
+    <tr>
+      <td>${it.produtoCodigo}</td>
+      <td>${it.produtoNome}</td>
+      <td style="text-align:right;">${it.quantidade}${it.unidade ? ` ${it.unidade}` : ''}</td>
+    </tr>
+  `).join('')
+
   const corpo = `
     ${cabecalhoComLogo('Comprovante de Retirada de Material', dados.logoUrl)}
     <div class="subtitulo" style="margin-top:-8px;">${dados.empresaNome}</div>
@@ -27,16 +39,6 @@ export function gerarHtmlSaidaAlmoxarifado(dados: DadosSaidaAlmoxarifado): strin
         <td>${dados.setor || '—'}</td>
       </tr>
       <tr>
-        <td class="label">Código do material/ferramenta</td>
-        <td>${dados.produtoCodigo}</td>
-        <td class="label">Quantidade</td>
-        <td>${dados.quantidade}${dados.unidade ? ` ${dados.unidade}` : ''}</td>
-      </tr>
-      <tr>
-        <td class="label">Material/Ferramenta</td>
-        <td colspan="3">${dados.produtoNome}</td>
-      </tr>
-      <tr>
         <td class="label">Retirado por</td>
         <td colspan="3">${dados.retiradoPorNome}</td>
       </tr>
@@ -44,6 +46,15 @@ export function gerarHtmlSaidaAlmoxarifado(dados: DadosSaidaAlmoxarifado): strin
         <td class="label">Solicitado por</td>
         <td colspan="3">${dados.solicitadoPorNome || '—'}</td>
       </tr>
+    </table>
+
+    <table class="dados" style="margin-top:10px;">
+      <tr>
+        <td class="label">Código</td>
+        <td class="label">Material/Ferramenta</td>
+        <td class="label" style="text-align:right;">Quantidade</td>
+      </tr>
+      ${linhasItens}
     </table>
 
     <div class="assinaturas">

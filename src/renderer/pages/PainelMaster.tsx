@@ -70,6 +70,14 @@ function ModalObra({ obra, onClose, onSaved }: { obra?: ObraResumo | null; onClo
   const [cidade, setCidade]     = useState('')
   const [estado, setEstado]     = useState('')
   const [logoUrl, setLogoUrl]   = useState('')
+  // NOVO: código da obra no sistema externo de folha de pagamento —
+  // digitado uma vez aqui, usado depois na exportação da Folha de
+  // Pagamento (Recursos Humanos), sem precisar redigitar toda vez.
+  const [codigoEmpresa, setCodigoEmpresa] = useState('')
+  // NOVO: valor da mensalidade de uso do sistema (Faturas/boleto) —
+  // pré-preenchido com o valor do Plano Start (R$ 199,90) em obra
+  // nova; em obra existente, vem carregado com o que já está salvo.
+  const [valorMensalidade, setValorMensalidade] = useState('199,90')
   const [solicitantePadrao, setSolicitantePadrao] = useState('')
   const [autorizadoPorPadrao, setAutorizadoPorPadrao] = useState('')
   const [carregando, setCarregando] = useState(!!obra)
@@ -88,6 +96,10 @@ function ModalObra({ obra, onClose, onSaved }: { obra?: ObraResumo | null; onClo
       setCidade(completa.cidade ?? '')
       setEstado(completa.estado ?? '')
       setLogoUrl(completa.logo_url ?? '')
+      setCodigoEmpresa(completa.codigo_empresa ?? '')
+      if (completa.valor_mensalidade !== undefined && completa.valor_mensalidade !== null) {
+        setValorMensalidade(String(completa.valor_mensalidade).replace('.', ','))
+      }
       setSolicitantePadrao(completa.solicitante_padrao ?? '')
       setAutorizadoPorPadrao(completa.autorizado_por_padrao ?? '')
     }).finally(() => setCarregando(false))
@@ -122,6 +134,8 @@ function ModalObra({ obra, onClose, onSaved }: { obra?: ObraResumo | null; onClo
     const payload = {
       nome: tituloObra, titulo_obra: tituloObra, razao_social: razaoSocial, cnpj, email, telefone, endereco, cidade, estado, logo_url: logoUrl,
       solicitante_padrao: solicitantePadrao, autorizado_por_padrao: autorizadoPorPadrao,
+      codigo_empresa: codigoEmpresa,
+      valor_mensalidade: Number(valorMensalidade.replace(',', '.')) || 0,
     }
     try {
       if (obra) {
@@ -159,6 +173,18 @@ function ModalObra({ obra, onClose, onSaved }: { obra?: ObraResumo | null; onClo
               </p>
             </div>
             <Input label="CNPJ" value={cnpj} onChange={e => setCnpj(formatCNPJ(e.target.value))} placeholder="00.000.000/0000-00" />
+            <div>
+              <Input label="Código da Empresa" value={codigoEmpresa} onChange={e => setCodigoEmpresa(e.target.value)} placeholder="Ex: 155" />
+              <p className="text-xs text-gray-500 mt-1">
+                Código dessa obra no sistema de folha de pagamento — usado na exportação da Folha de Pagamento.
+              </p>
+            </div>
+            <div>
+              <Input label="Valor da Mensalidade (R$)" value={valorMensalidade} onChange={e => setValorMensalidade(e.target.value)} placeholder="199,90" />
+              <p className="text-xs text-gray-500 mt-1">
+                Cobrado por boleto (Faturas) — hoje o Plano Start, R$ 199,90.
+              </p>
+            </div>
             <Input label="E-mail" type="email" value={email} onChange={e => setEmail(e.target.value)} />
             <Input label="Telefone" value={telefone} onChange={e => setTelefone(e.target.value)} placeholder="(00) 00000-0000" />
             <Input label="Endereço" value={endereco} onChange={e => setEndereco(e.target.value)} className="md:col-span-2" />
@@ -555,16 +581,40 @@ export default function PainelMaster() {
         </div>
 
         <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mt-8 mb-3">Sistema</p>
-        <button onClick={() => navigate('/master/email')} className="flex items-center gap-4 bg-surface border border-surface-border rounded-xl p-4 hover:border-brand-500/50 hover:bg-surface-hover transition-colors text-left w-full md:w-auto md:min-w-[280px]">
-          <div className="w-10 h-10 rounded-lg bg-brand-500/15 flex items-center justify-center shrink-0">
-            <Mail size={17} className="text-brand-400" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-white">E-mail</p>
-            <p className="text-xs text-gray-500 mt-0.5">Servidor de recuperação de senha</p>
-          </div>
-          <ChevronRight size={16} className="text-gray-600" />
-        </button>
+        <div className="flex flex-col md:flex-row gap-3">
+          <button onClick={() => navigate('/master/usuarios')} className="flex items-center gap-4 bg-surface border border-surface-border rounded-xl p-4 hover:border-brand-500/50 hover:bg-surface-hover transition-colors text-left w-full md:w-auto md:min-w-[280px]">
+            <div className="w-10 h-10 rounded-lg bg-brand-500/15 flex items-center justify-center shrink-0">
+              <UserRound size={17} className="text-brand-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">Todos os Usuários</p>
+              <p className="text-xs text-gray-500 mt-0.5">De todas as obras, num lugar só</p>
+            </div>
+            <ChevronRight size={16} className="text-gray-600" />
+          </button>
+
+          <button onClick={() => navigate('/master/email')} className="flex items-center gap-4 bg-surface border border-surface-border rounded-xl p-4 hover:border-brand-500/50 hover:bg-surface-hover transition-colors text-left w-full md:w-auto md:min-w-[280px]">
+            <div className="w-10 h-10 rounded-lg bg-brand-500/15 flex items-center justify-center shrink-0">
+              <Mail size={17} className="text-brand-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">E-mail</p>
+              <p className="text-xs text-gray-500 mt-0.5">Servidor de recuperação de senha</p>
+            </div>
+            <ChevronRight size={16} className="text-gray-600" />
+          </button>
+
+          <button onClick={() => navigate('/master/exclusoes')} className="flex items-center gap-4 bg-surface border border-surface-border rounded-xl p-4 hover:border-brand-500/50 hover:bg-surface-hover transition-colors text-left w-full md:w-auto md:min-w-[280px]">
+            <div className="w-10 h-10 rounded-lg bg-brand-500/15 flex items-center justify-center shrink-0">
+              <Trash2 size={17} className="text-brand-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">Log de Exclusões</p>
+              <p className="text-xs text-gray-500 mt-0.5">Quem apagou o quê, e quando</p>
+            </div>
+            <ChevronRight size={16} className="text-gray-600" />
+          </button>
+        </div>
 
         <ConfirmDialog {...dialogProps} />
       </div>
@@ -890,7 +940,7 @@ export default function PainelMaster() {
             </div>
             <div className="bg-surface border border-surface-border rounded-xl p-4">
               <div className="flex items-center gap-2 text-gray-400 text-xs font-medium uppercase tracking-wide mb-2">
-                <Wallet size={13} /> Custo de folha
+                <Wallet size={13} /> Custo de Salários
               </div>
               <p className="text-lg font-bold text-white">{formatarMoeda(obraDetalhe.custo_folha)}</p>
             </div>

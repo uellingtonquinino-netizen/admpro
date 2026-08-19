@@ -12,6 +12,11 @@ import {
   Download,
 } from 'lucide-react'
 
+// NOTA: este arquivo não está roteado em lugar nenhum do app (achado
+// ao mexer em Configurações em ago/2026) — a tela de verdade é
+// SupervisorConfiguracoes.tsx, usada tanto por /configuracoes quanto
+// /supervisor/configuracoes. Deixado como estava antes dessa
+// descoberta, sem mexer, pra não confundir quem vier depois.
 // ── Abas ──────────────────────────────────────────────────
 const ABAS = [
   { id: 'empresa',      label: 'Empresa',      icon: Building2          },

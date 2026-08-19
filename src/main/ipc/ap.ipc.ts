@@ -3,7 +3,7 @@ import { getDb }   from '../database/connection'
 import { criarNotificacaoEvento } from './notificacoes.ipc'
 import { verificarLoteConcluido } from './lotes.ipc'
 import { getDatabaseProvider, getSupabase } from '../supabase/client'
-import { uploadDocumento } from '../supabase/storage'
+import { uploadDocumento, isStorageUri } from '../supabase/storage'
 import { basename } from 'path'
 
 interface Boleto {
@@ -21,7 +21,13 @@ interface RegistrarPayload {
   observacoes?:       string | null
   solicitante?:       string | null
   autorizado_por?:    string | null
-  anexos?:            string[]
+  data_emissao?:      string | null
+  anexos?:            AnexoPayload[]
+}
+
+interface AnexoPayload {
+  caminho:       string
+  vaiAssinatura?: boolean
 }
 
 export function registerApIpc() {
@@ -57,10 +63,10 @@ export function registerApIpc() {
       const { data: apId, error } = await getSupabase().rpc('criar_ap', { p })
       if (error) throw new Error(error.message)
       for (let ordem = 0; ordem < (p.anexos?.length ?? 0); ordem++) {
-        const local = p.anexos![ordem]
-        const remoto = `${p.empresa_id}/autorizacoes-pagamento/${apId}/${Date.now()}-${basename(local).replace(/[^a-zA-Z0-9._-]/g, '_')}`
-        const caminho = await uploadDocumento(local, remoto)
-        const resultado = await getSupabase().from('autorizacoes_pagamento_anexos').insert({ ap_id: apId, caminho, ordem })
+        const item = p.anexos![ordem]
+        const remoto = `${p.empresa_id}/autorizacoes-pagamento/${apId}/${Date.now()}-${basename(item.caminho).replace(/[^a-zA-Z0-9._-]/g, '_')}`
+        const caminho = await uploadDocumento(item.caminho, remoto)
+        const resultado = await getSupabase().from('autorizacoes_pagamento_anexos').insert({ ap_id: apId, caminho, ordem, vai_assinatura: item.vaiAssinatura ?? false })
         if (resultado.error) throw new Error(resultado.error.message)
       }
       return { id: apId }
@@ -75,10 +81,10 @@ export function registerApIpc() {
       const resultAp = db.prepare(`
         INSERT INTO autorizacoes_pagamento (
           empresa_id, beneficiario_tipo, beneficiario_id, beneficiario_nome,
-          descricao, valor, observacoes, vencimento, solicitante, autorizado_por
+          descricao, valor, observacoes, vencimento, solicitante, autorizado_por, data_emissao
         ) VALUES (
           @empresa_id, @beneficiario_tipo, @beneficiario_id, @beneficiario_nome,
-          @descricao, @valor, @observacoes, @vencimento, @solicitante, @autorizado_por
+          @descricao, @valor, @observacoes, @vencimento, @solicitante, @autorizado_por, @data_emissao
         )
       `).run({
         empresa_id:        p.empresa_id,
@@ -91,6 +97,7 @@ export function registerApIpc() {
         vencimento:        p.boletos[0].vencimento,
         solicitante:       p.solicitante ?? null,
         autorizado_por:    p.autorizado_por ?? null,
+        data_emissao:      p.data_emissao || hoje,
       })
       const apId = resultAp.lastInsertRowid as number
 
@@ -120,9 +127,9 @@ export function registerApIpc() {
       // com eles depois, sem precisar anexar tudo de novo.
       if (p.anexos && p.anexos.length > 0) {
         const inserirAnexo = db.prepare(`
-          INSERT INTO autorizacoes_pagamento_anexos (ap_id, caminho, ordem) VALUES (?, ?, ?)
+          INSERT INTO autorizacoes_pagamento_anexos (ap_id, caminho, ordem, vai_assinatura) VALUES (?, ?, ?, ?)
         `)
-        p.anexos.forEach((caminho, i) => inserirAnexo.run(apId, caminho, i))
+        p.anexos.forEach((item, i) => inserirAnexo.run(apId, item.caminho, i, item.vaiAssinatura ? 1 : 0))
       }
 
       return apId
@@ -145,8 +152,38 @@ export function registerApIpc() {
   // ── Dados completos das AP's selecionadas, prontos pra "capa" ──
   // NOVO: mesma ideia do lotes:apsParaCapa, mas por uma lista de ids
   // escolhida na hora (não precisa estar dentro de um lote enviado).
-  ipcMain.handle('ap:capaPorIds', (_e, ap_ids: number[]) => {
+  ipcMain.handle('ap:capaPorIds', async (_e, ap_ids: number[]) => {
     if (ap_ids.length === 0) return []
+    if (getDatabaseProvider() === 'supabase') {
+      const s = getSupabase()
+      const { data: aps, error } = await s.from('autorizacoes_pagamento').select('*').in('id', ap_ids).order('id')
+      if (error) throw new Error(error.message)
+      const linhas = aps ?? []
+      const idsFornecedor = linhas.filter(a => a.beneficiario_tipo === 'fornecedor').map(a => a.beneficiario_id)
+      const idsColaborador = linhas.filter(a => a.beneficiario_tipo === 'colaborador').map(a => a.beneficiario_id)
+      const [{ data: fornecedores, error: e1 }, { data: colaboradores, error: e2 }, { data: boletos, error: e3 }] = await Promise.all([
+        idsFornecedor.length ? s.from('fornecedores').select('id,cnpj,cpf,forma_pagamento,banco,agencia,operacao,conta,conta_digito').in('id', idsFornecedor) : Promise.resolve({ data: [], error: null }),
+        idsColaborador.length ? s.from('colaboradores').select('id,cpf,banco,agencia,operacao,conta,conta_digito').in('id', idsColaborador) : Promise.resolve({ data: [], error: null }),
+        s.from('autorizacoes_pagamento_boletos').select('ap_id,valor,vencimento').in('ap_id', ap_ids).order('vencimento'),
+      ])
+      for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+      const fornecedoresPorId = new Map((fornecedores ?? []).map(f => [f.id, f]))
+      const colaboradoresPorId = new Map((colaboradores ?? []).map(c => [c.id, c]))
+      return linhas.map(a => {
+        const origem: any = a.beneficiario_tipo === 'fornecedor' ? fornecedoresPorId.get(a.beneficiario_id) : colaboradoresPorId.get(a.beneficiario_id)
+        const boletosDaAp = (boletos ?? []).filter(b => b.ap_id === a.id)
+        return {
+          id: a.id, created_at: a.created_at, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
+          cnpj: a.beneficiario_tipo === 'fornecedor' ? origem?.cnpj ?? null : null,
+          cpf: origem?.cpf ?? null,
+          forma_pagamento: a.beneficiario_tipo === 'fornecedor' ? origem?.forma_pagamento ?? null : null,
+          banco: origem?.banco ?? null, agencia: origem?.agencia ?? null, operacao: origem?.operacao ?? null,
+          conta: origem?.conta ?? null, conta_digito: origem?.conta_digito ?? null,
+          primeiro_vencimento: boletosDaAp.length ? boletosDaAp[0].vencimento : null,
+          valor_total: boletosDaAp.length ? boletosDaAp.reduce((soma, b) => soma + Number(b.valor), 0) : Number(a.valor),
+        }
+      })
+    }
     const placeholders = ap_ids.map(() => '?').join(',')
     return db.prepare(`
       SELECT
@@ -177,12 +214,18 @@ export function registerApIpc() {
     const empresa_id = typeof p === 'number' ? p : p.empresa_id
     const dataInicio  = typeof p === 'number' ? undefined : p.dataInicio
     const dataFim     = typeof p === 'number' ? undefined : p.dataFim
-    if(getDatabaseProvider()==='supabase') { let q=getSupabase().from('autorizacoes_pagamento').select('beneficiario_nome,valor,created_at').eq('empresa_id',empresa_id);if(dataInicio&&dataFim)q=q.gte('created_at',dataInicio).lte('created_at',`${dataFim}T23:59:59.999Z`);const {data,error}=await q;if(error)throw new Error(error.message);const grupos=new Map<string,number>();for(const a of data??[])grupos.set(a.beneficiario_nome,(grupos.get(a.beneficiario_nome)??0)+Number(a.valor));return {total:(data??[]).length,valorTotal:(data??[]).reduce((x,a)=>x+Number(a.valor),0),porFornecedor:[...grupos].sort(([a],[b])=>a.localeCompare(b)).map(([nome,total])=>({nome,total}))} }
+    // CORRIGIDO: filtrava por created_at (hora técnica do registro no
+    // banco, sempre "hoje" na hora de criar) em vez de data_emissao
+    // (a data de verdade da AP, editável) — por isso os cards de
+    // resumo davam zero mesmo com APs visíveis na lista logo abaixo,
+    // que já filtrava certo. Mesma lógica do ap:listar, replicada
+    // aqui pros dois ficarem sempre batendo.
+    if(getDatabaseProvider()==='supabase') { let q=getSupabase().from('autorizacoes_pagamento').select('beneficiario_nome,valor,data_emissao,created_at').eq('empresa_id',empresa_id);if(dataInicio&&dataFim)q=q.gte('data_emissao',dataInicio).lte('data_emissao',dataFim);const {data,error}=await q;if(error)throw new Error(error.message);const grupos=new Map<string,number>();for(const a of data??[])grupos.set(a.beneficiario_nome,(grupos.get(a.beneficiario_nome)??0)+Number(a.valor));return {total:(data??[]).length,valorTotal:(data??[]).reduce((x,a)=>x+Number(a.valor),0),porFornecedor:[...grupos].sort(([a],[b])=>a.localeCompare(b)).map(([nome,total])=>({nome,total}))} }
 
     const conds:  string[] = ['empresa_id = @empresa_id']
     const params: Record<string, unknown> = { empresa_id }
     if (dataInicio && dataFim) {
-      conds.push(`date(created_at) BETWEEN date(@dataInicio) AND date(@dataFim)`)
+      conds.push(`date(COALESCE(data_emissao, created_at)) BETWEEN date(@dataInicio) AND date(@dataFim)`)
       params.dataInicio = dataInicio
       params.dataFim = dataFim
     }
@@ -214,7 +257,7 @@ export function registerApIpc() {
   }) => {
     const perPage = p.perPage ?? 20
     const offset  = ((p.page ?? 1) - 1) * perPage
-    if(getDatabaseProvider()==='supabase') { let q=getSupabase().from('autorizacoes_pagamento').select('*').eq('empresa_id',p.empresa_id).order('created_at',{ascending:false});if(p.dataInicio&&p.dataFim)q=q.gte('created_at',p.dataInicio).lte('created_at',`${p.dataFim}T23:59:59.999Z`);const {data,error}=await q;if(error)throw new Error(error.message);let filtradas=data??[];if(p.busca){const b=p.busca.toLowerCase();filtradas=filtradas.filter(a=>a.beneficiario_nome.toLowerCase().includes(b)||(a.descricao??'').toLowerCase().includes(b)||String(a.valor).includes(b))}const ids=filtradas.map(a=>a.id);let boletos:any[]=[];if(ids.length){const r=await getSupabase().from('autorizacoes_pagamento_boletos').select('id,ap_id,valor').in('ap_id',ids);if(r.error)throw new Error(r.error.message);boletos=r.data??[]}const items=filtradas.slice(offset,offset+perPage).map(a=>{const bs=boletos.filter(b=>b.ap_id===a.id);return {...a,valor_total:bs.length?bs.reduce((x,b)=>x+Number(b.valor),0):Number(a.valor),qtd_boletos:bs.length}});return {items,total:filtradas.length} }
+    if(getDatabaseProvider()==='supabase') { let q=getSupabase().from('autorizacoes_pagamento').select('*').eq('empresa_id',p.empresa_id).order('data_emissao',{ascending:false});if(p.dataInicio&&p.dataFim)q=q.gte('data_emissao',p.dataInicio).lte('data_emissao',p.dataFim);const {data,error}=await q;if(error)throw new Error(error.message);let filtradas=data??[];if(p.busca){const b=p.busca.toLowerCase();filtradas=filtradas.filter(a=>a.beneficiario_nome.toLowerCase().includes(b)||(a.descricao??'').toLowerCase().includes(b)||String(a.valor).includes(b))}const ids=filtradas.map(a=>a.id);let boletos:any[]=[];if(ids.length){const r=await getSupabase().from('autorizacoes_pagamento_boletos').select('id,ap_id,valor').in('ap_id',ids);if(r.error)throw new Error(r.error.message);boletos=r.data??[]}const items=filtradas.slice(offset,offset+perPage).map(a=>{const bs=boletos.filter(b=>b.ap_id===a.id);return {...a,valor_total:bs.length?bs.reduce((x,b)=>x+Number(b.valor),0):Number(a.valor),qtd_boletos:bs.length}});return {items,total:filtradas.length} }
 
     const conds:  string[] = ['a.empresa_id = @empresa_id']
     const params: Record<string, unknown> = { empresa_id: p.empresa_id }
@@ -228,10 +271,11 @@ export function registerApIpc() {
       params.busca = `%${p.busca}%`
     }
 
-    // NOVO: filtro por período — pela data de EMISSÃO da AP (quando
-    // ela foi registrada), não pelo vencimento dos boletos.
+    // Filtro por período — pela data de EMISSÃO da AP (agora um campo
+    // de verdade, editável — antes usava created_at, que é só a hora
+    // técnica do registro no banco, sempre "hoje" na hora de criar).
     if (p.dataInicio && p.dataFim) {
-      conds.push(`date(a.created_at) BETWEEN date(@dataInicio) AND date(@dataFim)`)
+      conds.push(`date(COALESCE(a.data_emissao, a.created_at)) BETWEEN date(@dataInicio) AND date(@dataFim)`)
       params.dataInicio = p.dataInicio
       params.dataFim = p.dataFim
     }
@@ -248,7 +292,7 @@ export function registerApIpc() {
       LEFT JOIN autorizacoes_pagamento_boletos b ON b.ap_id = a.id
       WHERE ${where}
       GROUP BY a.id
-      ORDER BY a.created_at DESC
+      ORDER BY COALESCE(a.data_emissao, a.created_at) DESC, a.created_at DESC
       LIMIT @perPage OFFSET @offset
     `).all({ ...params, perPage, offset })
 
@@ -257,7 +301,17 @@ export function registerApIpc() {
 
   // ── Buscar uma AP com seus boletos e anexos ──────────────
   ipcMain.handle('ap:buscarPorId', async (_e, id: number) => {
-    if(getDatabaseProvider()==='supabase') { const s=getSupabase();const [{data:ap,error:e1},{data:boletos,error:e2},{data:anexosRows,error:e3}]=await Promise.all([s.from('autorizacoes_pagamento').select('*').eq('id',id).maybeSingle(),s.from('autorizacoes_pagamento_boletos').select('*').eq('ap_id',id).order('vencimento'),s.from('autorizacoes_pagamento_anexos').select('caminho').eq('ap_id',id).order('ordem')]);for(const e of [e1,e2,e3])if(e)throw new Error(e.message);if(!ap)return null;const ids=[ap.aprovado_por_usuario_id,ap.aprovado_supervisor_por_usuario_id].filter((x):x is number=>x!==null);let usuarios:any[]=[];if(ids.length){const r=await s.from('usuarios').select('id,carimbo_url').in('id',ids);if(r.error)throw new Error(r.error.message);usuarios=r.data??[]}const carimbos=new Map(usuarios.map(u=>[u.id,u.carimbo_url]));return {...ap,aprovado_por_carimbo_url:carimbos.get(ap.aprovado_por_usuario_id)??null,aprovado_supervisor_carimbo_url:carimbos.get(ap.aprovado_supervisor_por_usuario_id)??null,boletos:boletos??[],anexos:(anexosRows??[]).map(a=>a.caminho)} }
+    if(getDatabaseProvider()==='supabase') { const s=getSupabase();const [{data:ap,error:e1},{data:boletos,error:e2},{data:anexosRows,error:e3}]=await Promise.all([s.from('autorizacoes_pagamento').select('*').eq('id',id).maybeSingle(),s.from('autorizacoes_pagamento_boletos').select('*').eq('ap_id',id).order('vencimento'),s.from('autorizacoes_pagamento_anexos').select('caminho,vai_assinatura').eq('ap_id',id).order('ordem')]);for(const e of [e1,e2,e3])if(e)throw new Error(e.message);if(!ap)return null;const ids=[ap.aprovado_por_usuario_id,ap.aprovado_supervisor_por_usuario_id].filter((x):x is number=>x!==null);let usuarios:any[]=[];if(ids.length){
+      // CORRIGIDO: ler direto de "usuarios" aqui era bloqueado pela
+      // política de RLS (só permite ver o PRÓPRIO perfil, ou ser
+      // Master) — sempre que quem estava OLHANDO/EDITANDO a AP era
+      // diferente de quem tinha aprovado, essa consulta voltava vazia
+      // sem erro nenhum, e o carimbo sumia (ex: ADM edita uma AP
+      // aprovada pelo Gestor, o carimbo dele desaparece do PDF
+      // regenerado). A função carimbos_usuarios() no banco busca só o
+      // carimbo_url, contornando essa trava só pra esse uso legítimo,
+      // sem abrir e-mail/permissões de ninguém.
+      const r=await s.rpc('carimbos_usuarios',{p_ids:ids});if(r.error)throw new Error(r.error.message);usuarios=r.data??[]}const carimbos=new Map(usuarios.map(u=>[u.id,u.carimbo_url]));return {...ap,aprovado_por_carimbo_url:carimbos.get(ap.aprovado_por_usuario_id)??null,aprovado_supervisor_carimbo_url:carimbos.get(ap.aprovado_supervisor_por_usuario_id)??null,boletos:boletos??[],anexos:(anexosRows??[]).map(a=>({caminho:a.caminho,vaiAssinatura:!!a.vai_assinatura}))} }
     const ap = db.prepare(`
       SELECT a.*, ug.carimbo_url AS aprovado_por_carimbo_url, us.carimbo_url AS aprovado_supervisor_carimbo_url
       FROM autorizacoes_pagamento a
@@ -270,9 +324,9 @@ export function registerApIpc() {
       `SELECT * FROM autorizacoes_pagamento_boletos WHERE ap_id = ? ORDER BY vencimento ASC`
     ).all(id)
     const anexosRows = db.prepare(
-      `SELECT caminho FROM autorizacoes_pagamento_anexos WHERE ap_id = ? ORDER BY ordem ASC`
-    ).all(id) as { caminho: string }[]
-    return { ...ap, boletos, anexos: anexosRows.map(a => a.caminho) }
+      `SELECT caminho, vai_assinatura FROM autorizacoes_pagamento_anexos WHERE ap_id = ? ORDER BY ordem ASC`
+    ).all(id) as { caminho: string; vai_assinatura: number }[]
+    return { ...ap, boletos, anexos: anexosRows.map(a => ({ caminho: a.caminho, vaiAssinatura: !!a.vai_assinatura })) }
   })
 
   // ── Editar uma AP já registrada no histórico ────────────
@@ -284,18 +338,47 @@ export function registerApIpc() {
     boletos: Boleto[]
     observacoes?: string | null
     solicitante?: string | null; autorizado_por?: string | null
-    anexos?: string[]
+    data_emissao?: string | null
+    anexos?: AnexoPayload[]
   }) => {
-    if(getDatabaseProvider()==='supabase') { const {error}=await getSupabase().rpc('atualizar_ap',{p});if(error)throw new Error(error.message);return {ok:true} }
+    if(getDatabaseProvider()==='supabase') {
+      const s = getSupabase()
+      // CORRIGIDO: editar uma AP nunca fazia upload de anexo novo —
+      // só ap:registrar (criar) fazia isso. Um anexo aqui pode ser um
+      // caminho já enviado antes (supabase://...) ou um arquivo local
+      // recém-escolhido na edição — só o segundo caso precisa subir.
+      const { data: apAtual, error: erroAp } = await s.from('autorizacoes_pagamento').select('empresa_id').eq('id', p.id).single()
+      if (erroAp) throw new Error(erroAp.message)
+
+      const anexosFinais: { caminho: string; vaiAssinatura: boolean }[] = []
+      for (const item of p.anexos ?? []) {
+        if (isStorageUri(item.caminho)) {
+          anexosFinais.push({ caminho: item.caminho, vaiAssinatura: item.vaiAssinatura ?? false })
+        } else {
+          const remoto = `${apAtual.empresa_id}/autorizacoes-pagamento/${p.id}/${Date.now()}-${basename(item.caminho).replace(/[^a-zA-Z0-9._-]/g, '_')}`
+          anexosFinais.push({ caminho: await uploadDocumento(item.caminho, remoto), vaiAssinatura: item.vaiAssinatura ?? false })
+        }
+      }
+      const { error } = await s.rpc('atualizar_ap', { p: { ...p, anexos: anexosFinais } })
+      if (error) throw new Error(error.message)
+      return { ok: true }
+    }
     if (!p.boletos || p.boletos.length === 0) {
       throw new Error('Inclua ao menos um valor e vencimento.')
     }
     const total = p.boletos.reduce((soma, b) => soma + b.valor, 0)
 
     const atualizar = db.transaction(() => {
-      const ap = db.prepare(`SELECT empresa_id FROM autorizacoes_pagamento WHERE id = ?`)
-        .get(p.id) as { empresa_id: number }
+      const ap = db.prepare(`SELECT empresa_id, data_emissao FROM autorizacoes_pagamento WHERE id = ?`)
+        .get(p.id) as { empresa_id: number; data_emissao: string | null }
 
+      // CORRIGIDO: uma vez que a AP já tinha um PDF gerado (pdf_path
+      // preenchido), "Imprimir" sempre reabria esse arquivo salvo sem
+      // checar se os dados mudaram — editar a descrição (ou qualquer
+      // outro campo) atualizava o banco certinho, mas o PDF antigo
+      // continuava sendo mostrado pra sempre. Zerando pdf_path aqui,
+      // a próxima impressão detecta que não tem PDF pronto e gera um
+      // novo, já com os dados atualizados.
       db.prepare(`
         UPDATE autorizacoes_pagamento
         SET beneficiario_nome = @beneficiario_nome,
@@ -304,7 +387,9 @@ export function registerApIpc() {
             observacoes       = @observacoes,
             vencimento        = @vencimento,
             solicitante       = @solicitante,
-            autorizado_por    = @autorizado_por
+            autorizado_por    = @autorizado_por,
+            data_emissao      = @data_emissao,
+            pdf_path          = NULL
         WHERE id = @id
       `).run({
         id:                p.id,
@@ -315,6 +400,7 @@ export function registerApIpc() {
         vencimento:        p.boletos[0].vencimento,
         solicitante:       p.solicitante ?? null,
         autorizado_por:    p.autorizado_por ?? null,
+        data_emissao:      p.data_emissao || ap.data_emissao,
       })
 
       // Remove despesas ligadas aos boletos antigos e os próprios boletos
@@ -354,9 +440,9 @@ export function registerApIpc() {
       if (p.anexos !== undefined) {
         db.prepare(`DELETE FROM autorizacoes_pagamento_anexos WHERE ap_id = ?`).run(p.id)
         const inserirAnexo = db.prepare(`
-          INSERT INTO autorizacoes_pagamento_anexos (ap_id, caminho, ordem) VALUES (?, ?, ?)
+          INSERT INTO autorizacoes_pagamento_anexos (ap_id, caminho, ordem, vai_assinatura) VALUES (?, ?, ?, ?)
         `)
-        p.anexos.forEach((caminho, i) => inserirAnexo.run(p.id, caminho, i))
+        p.anexos.forEach((item, i) => inserirAnexo.run(p.id, item.caminho, i, item.vaiAssinatura ? 1 : 0))
       }
     })
 
@@ -365,7 +451,12 @@ export function registerApIpc() {
   })
 
   // ── Guardar o caminho do PDF já salvo (AP + anexos) ──────
-  ipcMain.handle('ap:salvarCaminhoPdf', (_e, p: { id: number; pdf_path: string }) => {
+  ipcMain.handle('ap:salvarCaminhoPdf', async (_e, p: { id: number; pdf_path: string }) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const { error } = await getSupabase().from('autorizacoes_pagamento').update({ pdf_path: p.pdf_path }).eq('id', p.id)
+      if (error) throw new Error(error.message)
+      return { ok: true }
+    }
     db.prepare(`UPDATE autorizacoes_pagamento SET pdf_path = ? WHERE id = ?`).run(p.pdf_path, p.id)
     return { ok: true }
   })

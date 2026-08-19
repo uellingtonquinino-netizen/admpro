@@ -3,11 +3,12 @@ import { useAuthStore } from '@store/auth.store'
 import { toast } from '@components/ui/ToastContainer'
 import Button from '@components/ui/Button'
 import Input from '@components/ui/Input'
+import ConfigBackup from '@components/configuracoes/ConfigBackup'
 import {
-  Settings, ShieldCheck, KeyRound, Mail, ChevronRight, ArrowLeft, Lock, Stamp, Upload, Trash2,
+  Settings, ShieldCheck, KeyRound, Mail, ChevronRight, ArrowLeft, Lock, Stamp, Upload, Trash2, DatabaseBackup,
 } from 'lucide-react'
 
-type View = 'menu' | 'seguranca' | 'carimbo'
+type View = 'menu' | 'seguranca' | 'carimbo' | 'backup'
 
 // ALTERADO: essa página de Configurações deixou de ser só do
 // Supervisor — o mesmo componente agora é usado também por ADM e
@@ -20,6 +21,13 @@ export default function SupervisorConfiguracoes() {
   const usuario = useAuthStore(s => s.usuario)
   const atualizarUsuario = useAuthStore(s => s.atualizarUsuario)
   const [view, setView] = useState<View>('menu')
+
+  // NOVO: Backup entrou aqui como mais uma categoria — antes era uma
+  // página própria, solta na barra lateral. Master sempre vê; ADM só
+  // se não tiver a chave "backup" desmarcada explicitamente pelo
+  // Master (mesma regra que já existia lá na barra).
+  const podeVerBackup = usuario?.perfil === 'master' ||
+    (usuario?.perfil === 'admin' && !(usuario?.permissoes_negadas ?? []).includes('backup'))
 
   // ── Trocar Senha ──────────────────────────────────────
   const [senhaAtual, setSenhaAtual] = useState('')
@@ -144,6 +152,23 @@ export default function SupervisorConfiguracoes() {
             </div>
             <ChevronRight size={18} className="text-gray-600" />
           </button>
+
+          {podeVerBackup && (
+            <button
+              onClick={() => setView('backup')}
+              className="w-full flex items-center gap-4 bg-surface border border-surface-border rounded-2xl p-5
+                         hover:border-brand-500/50 hover:bg-surface-hover transition-colors text-left"
+            >
+              <div className="w-11 h-11 rounded-xl bg-brand-500/15 flex items-center justify-center shrink-0">
+                <DatabaseBackup size={20} className="text-brand-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-white">Backup</p>
+                <p className="text-xs text-gray-500 mt-0.5">Exportar e restaurar os dados do sistema</p>
+              </div>
+              <ChevronRight size={18} className="text-gray-600" />
+            </button>
+          )}
         </div>
       </div>
     )
@@ -195,6 +220,27 @@ export default function SupervisorConfiguracoes() {
             </Button>
           </div>
         </div>
+      </div>
+    )
+  }
+
+  if (view === 'backup') {
+    return (
+      <div className="max-w-2xl mx-auto">
+        <button
+          onClick={() => setView('menu')}
+          className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-white mb-4 transition-colors"
+        >
+          <ArrowLeft size={14} /> Voltar
+        </button>
+
+        <div className="flex items-center gap-2 mb-1">
+          <DatabaseBackup size={20} className="text-brand-400" />
+          <h1 className="text-xl font-bold text-white">Backup</h1>
+        </div>
+        <p className="text-sm text-gray-500 mb-6">Exportar e restaurar os dados do sistema.</p>
+
+        <ConfigBackup />
       </div>
     )
   }

@@ -1,6 +1,7 @@
 import { useCurrency } from '@hooks/useCurrency'
 import Card             from '@components/ui/Card'
 import { clsx }         from 'clsx'
+import { formatReais }  from '@utils/folhaPagamentoCalculo'
 import {
   Users, Wallet, CalendarHeart, UserRound,
 } from 'lucide-react'
@@ -34,6 +35,10 @@ interface ResumoRHData {
 interface Props {
   data:    ResumoRHData | null
   loading: boolean
+  // NOVO: total aproximado da Folha de Pagamento salva pro mês/ano
+  // do filtro (null = nenhuma folha salva pra esse mês).
+  totalFolha:        number | null
+  loadingTotalFolha: boolean
 }
 
 const statusLabel: Record<string, string> = {
@@ -49,7 +54,7 @@ const TEMAS = {
   purple: { bg: 'bg-purple-500/10', border: 'border-purple-500/30', iconBg: 'bg-purple-500', text: 'text-white' },
 }
 
-export default function ResumoRH({ data, loading }: Props) {
+export default function ResumoRH({ data, loading, totalFolha, loadingTotalFolha }: Props) {
   const { format } = useCurrency()
 
   const afastados  = data?.porStatus.find(s => s.status === 'afastado')?.quantidade ?? 0
@@ -64,9 +69,17 @@ export default function ResumoRH({ data, loading }: Props) {
       sub: afastados || emFerias ? `${afastados} afastado(s) · ${emFerias} em férias` : 'Nenhum afastamento',
     },
     {
-      label: 'Custo total da folha', value: format(data.custoFolha),
+      label: 'Custo de Salários', value: format(data.custoFolha),
       icon: Wallet, tema: TEMAS.green,
-      sub: format(data.custoFolha),
+      // ALTERADO: antes repetia o mesmo valor de cima (`format(data.custoFolha)`)
+      // — agora mostra o total aproximado da Folha de Pagamento SALVA
+      // pro mês/ano escolhido no filtro (soma de salário + adicionais
+      // − descontos de cada colaborador, com DSR sobre hora extra).
+      sub: loadingTotalFolha
+        ? 'Calculando...'
+        : totalFolha !== null
+        ? `Total Aproximado da Folha ${formatReais(totalFolha)}`
+        : 'Nenhuma folha salva pra esse mês',
     },
     {
       label: 'Média de idade', value: data.mediaIdade ? `${data.mediaIdade} anos` : '—',
@@ -173,7 +186,7 @@ export default function ResumoRH({ data, loading }: Props) {
               ) : data.aniversariantes.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-8">Nenhum aniversariante este mês.</p>
               ) : (
-                <div className="space-y-1">
+                <div className="space-y-1 max-h-[420px] overflow-y-auto pr-1">
                   {data.aniversariantes.map(a => {
                     const dia = Number(a.nascimento.slice(8, 10))
                     return (

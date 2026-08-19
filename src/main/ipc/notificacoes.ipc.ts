@@ -33,6 +33,34 @@ export function registerNotificacoesIpc() {
     `).all(empresa_id)
   })
 
+  // ── Faturas vencendo hoje / já vencidas ──────────────────
+  // NOVO: mesmo princípio do estoque mínimo/zerado acima — calculado
+  // na hora que o sino é aberto, não fica guardado numa tabela. Some
+  // sozinho quando a fatura for paga (não precisa "marcar como
+  // lida").
+  ipcMain.handle('notificacoes:faturas', async (_e, empresa_id: number) => {
+    const hoje = new Date().toISOString().slice(0, 10)
+    if (getDatabaseProvider() === 'supabase') {
+      const { data, error } = await getSupabase()
+        .from('faturas').select('id,mes_competencia,vencimento,valor')
+        .eq('empresa_id', empresa_id).eq('status', 'aberta').order('vencimento')
+      if (error) throw new Error(error.message)
+      const todas = data ?? []
+      return {
+        vencidas:  todas.filter(f => f.vencimento < hoje),
+        venceHoje: todas.filter(f => f.vencimento === hoje),
+      }
+    }
+    const todas = db.prepare(`
+      SELECT id, mes_competencia, vencimento, valor FROM faturas
+      WHERE empresa_id = ? AND status = 'aberta' ORDER BY vencimento
+    `).all(empresa_id) as { vencimento: string }[]
+    return {
+      vencidas:  todas.filter(f => f.vencimento < hoje),
+      venceHoje: todas.filter(f => f.vencimento === hoje),
+    }
+  })
+
   // ── Eventos não lidos, para o perfil do usuário logado ────
   // (AP nova, AP autorizada, entrada/saída de material, lote novo,
   // solicitação ao Setor Pessoal)

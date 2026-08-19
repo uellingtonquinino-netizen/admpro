@@ -30,6 +30,10 @@ export default function GerarDocumentoModal({ colaborador, onClose }: Props) {
   const [tipoId, setTipoId] = useState('')
   const [extras, setExtras] = useState<Record<string, string>>({})
   const [gerando, setGerando] = useState(false)
+  // NOVO: usado só pelo Protocolo de Entrega, pra permitir escolher um
+  // item já cadastrado no Almoxarifado (e preencher o valor sozinho)
+  // ou digitar um item que não está lá.
+  const [produtos, setProdutos] = useState<{ nome: string; valor_unitario: number }[]>([])
 
   const tipo = getTipoDocumento(tipoId)
 
@@ -49,6 +53,19 @@ export default function GerarDocumentoModal({ colaborador, onClose }: Props) {
       defaults.autorizado_nome = usuario.nome
     }
     setExtras(defaults)
+
+    if (id === 'protocolo_entrega' && empresa) {
+      window.api.produtos.listar({ empresa_id: empresa.id }).then(setProdutos).catch(() => setProdutos([]))
+    }
+  }
+
+  // NOVO: quando o item digitado bate (mesmo nome) com um produto do
+  // Almoxarifado, o valor unitário é preenchido sozinho — o usuário
+  // ainda pode digitar por cima se quiser outro valor.
+  function setItem(valor: string) {
+    setCampo('item', valor)
+    const produto = produtos.find(p => p.nome.toUpperCase() === valor.toUpperCase())
+    if (produto) setCampo('valor_unitario', String(produto.valor_unitario).replace('.', ','))
   }
 
   function setCampo(key: string, value: string) {
@@ -110,6 +127,21 @@ export default function GerarDocumentoModal({ colaborador, onClose }: Props) {
           tipo:           tipo.id,
           dados_json:     JSON.stringify(extras),
         })
+
+        // NOVO: gerar o Comunicado de Dispensa ao Setor Pessoal já
+        // desliga o colaborador sozinho — evita o passo manual de ir
+        // em Editar e trocar o status depois. Busca os dados mais
+        // recentes antes de salvar, pra não sobrescrever nenhum outro
+        // campo com informação desatualizada.
+        // CORRIGIDO: gravava só o status, nunca a Data de Demissão —
+        // o campo nem existia no cadastro até agora. Grava a data de
+        // hoje junto (é quando a dispensa está sendo formalizada).
+        if (tipo.id === 'requerimento_dispensa') {
+          const atual = await window.api.colaboradores.buscarPorId(colaborador.id)
+          const hoje = new Date().toISOString().slice(0, 10)
+          await window.api.colaboradores.atualizar({ ...atual, status: 'desligado', data_demissao: hoje })
+        }
+
         onClose()
       } else {
         toast.error('Erro ao abrir a impressão.')
@@ -147,6 +179,23 @@ export default function GerarDocumentoModal({ colaborador, onClose }: Props) {
                       value={extras[campo.key] ?? ''}
                       onChange={e => setCampo(campo.key, e.target.value.toUpperCase())}
                     />
+                  </div>
+                )
+              }
+              if (campo.type === 'busca_produto') {
+                return (
+                  <div key={campo.key} className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-gray-400">{campo.label}</label>
+                    <input
+                      list="lista-produtos-protocolo"
+                      className="input"
+                      value={extras[campo.key] ?? ''}
+                      onChange={e => setItem(e.target.value.toUpperCase())}
+                      placeholder="Busque no cadastro ou digite"
+                    />
+                    <datalist id="lista-produtos-protocolo">
+                      {produtos.map(p => <option key={p.nome} value={p.nome} />)}
+                    </datalist>
                   </div>
                 )
               }

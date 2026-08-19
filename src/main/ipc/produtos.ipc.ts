@@ -8,6 +8,7 @@ interface ProdutoPayload {
   nome:           string
   descricao?:     string | null
   unidade?:       string | null
+  categoria?:     string | null
   estoque_atual?: number
   estoque_minimo?: number
   valor_unitario?: number
@@ -22,10 +23,11 @@ export function registerProdutosIpc() {
   const db = getDb()
 
   // ── Listar (com busca) ───────────────────────────────────
-  ipcMain.handle('produtos:listar', async (_e, p: { empresa_id: number; busca?: string }) => {
+  ipcMain.handle('produtos:listar', async (_e, p: { empresa_id: number; busca?: string; categoria?: string }) => {
     if (getDatabaseProvider() === 'supabase') {
       let query = getSupabase().from('produtos').select('*').eq('empresa_id', p.empresa_id).order('nome')
       if (p.busca) query = query.ilike('nome', `%${p.busca.replace(/[%_]/g, '\\$&')}%`)
+      if (p.categoria) query = query.eq('categoria', p.categoria)
       const { data, error } = await query; if (error) throw new Error(error.message); return data ?? []
     }
     const conds:  string[] = ['pr.empresa_id = @empresa_id']
@@ -34,11 +36,30 @@ export function registerProdutosIpc() {
       conds.push(`(pr.codigo LIKE @busca OR pr.nome LIKE @busca)`)
       params.busca = `%${p.busca}%`
     }
+    if (p.categoria) {
+      conds.push(`pr.categoria = @categoria`)
+      params.categoria = p.categoria
+    }
     return db.prepare(`
       SELECT pr.*, f.nome AS fornecedor_nome
       FROM produtos pr LEFT JOIN fornecedores f ON f.id = pr.fornecedor_id
       WHERE ${conds.join(' AND ')} ORDER BY pr.nome COLLATE NOCASE ASC
     `).all(params)
+  })
+
+  // ── NOVO: categorias já cadastradas (pra alimentar o filtro
+  // da página inicial, sem repetir a mesma lista de opções fixas).
+  ipcMain.handle('produtos:categorias', async (_e, empresa_id: number) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const { data, error } = await getSupabase().from('produtos').select('categoria').eq('empresa_id', empresa_id).not('categoria', 'is', null)
+      if (error) throw new Error(error.message)
+      return [...new Set((data ?? []).map(r => r.categoria).filter((v): v is string => !!v && v !== ''))].sort()
+    }
+    return db.prepare(`
+      SELECT DISTINCT categoria FROM produtos
+      WHERE empresa_id = ? AND categoria IS NOT NULL AND categoria != ''
+      ORDER BY categoria ASC
+    `).all(empresa_id).map(r => (r as { categoria: string }).categoria)
   })
 
   // ── Buscar por código exato (autocomplete na entrada de nota) ──
@@ -97,7 +118,14 @@ export function registerProdutosIpc() {
   ipcMain.handle('produtos:listarComMovimentacao', async (_e, p: {
     empresa_id: number; dataInicio?: string; dataFim?: string
   }) => {
-    if(getDatabaseProvider()==='supabase') { const s=getSupabase();const [{data:produtos,error:e1},{data:itens,error:e2},{data:saidas,error:e3}]=await Promise.all([s.from('produtos').select('id,codigo,nome,descricao,unidade,estoque_atual').eq('empresa_id',p.empresa_id).order('nome'),s.from('almoxarifado_entradas_itens').select('produto_id,almoxarifado_entradas(data)').eq('almoxarifado_entradas.empresa_id',p.empresa_id),s.from('almoxarifado_saidas').select('produto_id,data').eq('empresa_id',p.empresa_id)]);for(const e of [e1,e2,e3])if(e)throw new Error(e.message);const dentro=(d:string)=>!p.dataInicio||!p.dataFim||(d>=p.dataInicio&&d<=p.dataFim);return (produtos??[]).map(pr=>({...pr,ultima_entrada:(itens??[]).filter((i:any)=>i.produto_id===pr.id&&i.almoxarifado_entradas?.data&&dentro(i.almoxarifado_entradas.data)).map((i:any)=>i.almoxarifado_entradas.data).sort().at(-1)??null,ultima_saida:(saidas??[]).filter(x=>x.produto_id===pr.id&&dentro(x.data)).map(x=>x.data).sort().at(-1)??null})) }
+    // CORRIGIDO: almoxarifado_saidas virou cabeçalho+itens (pra
+    // aceitar vários materiais numa saída só) — essas duas consultas
+    // ainda buscavam produto_id/data direto em almoxarifado_saidas,
+    // coluna que não existe mais lá (agora fica em
+    // almoxarifado_saidas_itens). Por isso o Painel de Estoque parava
+    // de mostrar qualquer material (a consulta falhava e o erro era
+    // engolido silenciosamente no frontend).
+    if(getDatabaseProvider()==='supabase') { const s=getSupabase();const [{data:produtos,error:e1},{data:itens,error:e2},{data:itensSaida,error:e3}]=await Promise.all([s.from('produtos').select('id,codigo,nome,descricao,unidade,estoque_atual').eq('empresa_id',p.empresa_id).order('nome'),s.from('almoxarifado_entradas_itens').select('produto_id,almoxarifado_entradas(data)').eq('almoxarifado_entradas.empresa_id',p.empresa_id),s.from('almoxarifado_saidas_itens').select('produto_id,almoxarifado_saidas(data,empresa_id)')]);for(const e of [e1,e2,e3])if(e)throw new Error(e.message);const dentro=(d:string)=>!p.dataInicio||!p.dataFim||(d>=p.dataInicio&&d<=p.dataFim);const saidasDaObra=(itensSaida??[]).filter((x:any)=>x.almoxarifado_saidas?.empresa_id===p.empresa_id);return (produtos??[]).map(pr=>({...pr,ultima_entrada:(itens??[]).filter((i:any)=>i.produto_id===pr.id&&i.almoxarifado_entradas?.data&&dentro(i.almoxarifado_entradas.data)).map((i:any)=>i.almoxarifado_entradas.data).sort().at(-1)??null,ultima_saida:saidasDaObra.filter((x:any)=>x.produto_id===pr.id&&x.almoxarifado_saidas?.data&&dentro(x.almoxarifado_saidas.data)).map((x:any)=>x.almoxarifado_saidas.data).sort().at(-1)??null})) }
     const filtroData = p.dataInicio && p.dataFim
       ? `AND date(data) BETWEEN date(@dataInicio) AND date(@dataFim)`
       : ''
@@ -112,7 +140,8 @@ export function registerProdutosIpc() {
         ) AS ultima_entrada,
         (
           SELECT MAX(s.data) FROM almoxarifado_saidas s
-          WHERE s.produto_id = pr.id
+          JOIN almoxarifado_saidas_itens si ON si.saida_id = s.id
+          WHERE si.produto_id = pr.id
           ${filtroData.replace('data', 's.data')}
         ) AS ultima_saida
       FROM produtos pr
@@ -125,7 +154,8 @@ export function registerProdutosIpc() {
   ipcMain.handle('produtos:movimentacao', async (_e, p: {
     produto_id: number; dataInicio?: string; dataFim?: string
   }) => {
-    if(getDatabaseProvider()==='supabase') { const s=getSupabase();const [{data:itens,error:e1},{data:saidas,error:e2}]=await Promise.all([s.from('almoxarifado_entradas_itens').select('quantidade,entrada_id,almoxarifado_entradas(data,fornecedor_nome,numero_nota)').eq('produto_id',p.produto_id),s.from('almoxarifado_saidas').select('data,quantidade,retirado_por_nome,setor').eq('produto_id',p.produto_id)]);if(e1)throw new Error(e1.message);if(e2)throw new Error(e2.message);const inicio=p.dataInicio,end=p.dataFim;const dentro=(d:string)=>!inicio||!end||(d>=inicio&&d<=end);return [...(itens??[]).map((i:any)=>({tipo:'entrada',data:i.almoxarifado_entradas?.data,quantidade:i.quantidade,pessoa:i.almoxarifado_entradas?.fornecedor_nome,referencia:i.almoxarifado_entradas?.numero_nota})),...(saidas??[]).map(x=>({tipo:'saida',data:x.data,quantidade:x.quantidade,pessoa:x.retirado_por_nome,referencia:x.setor}))].filter(x=>x.data&&dentro(x.data)).sort((a,b)=>b.data.localeCompare(a.data)) }
+    // CORRIGIDO: mesma causa do handler acima.
+    if(getDatabaseProvider()==='supabase') { const s=getSupabase();const [{data:itens,error:e1},{data:itensSaida,error:e2}]=await Promise.all([s.from('almoxarifado_entradas_itens').select('quantidade,entrada_id,almoxarifado_entradas(data,fornecedor_nome,numero_nota)').eq('produto_id',p.produto_id),s.from('almoxarifado_saidas_itens').select('quantidade,saida_id,almoxarifado_saidas(data,retirado_por_nome,setor)').eq('produto_id',p.produto_id)]);if(e1)throw new Error(e1.message);if(e2)throw new Error(e2.message);const inicio=p.dataInicio,end=p.dataFim;const dentro=(d:string)=>!inicio||!end||(d>=inicio&&d<=end);return [...(itens??[]).map((i:any)=>({tipo:'entrada',data:i.almoxarifado_entradas?.data,quantidade:i.quantidade,pessoa:i.almoxarifado_entradas?.fornecedor_nome,referencia:i.almoxarifado_entradas?.numero_nota})),...(itensSaida??[]).map((x:any)=>({tipo:'saida',data:x.almoxarifado_saidas?.data,quantidade:x.quantidade,pessoa:x.almoxarifado_saidas?.retirado_por_nome,referencia:x.almoxarifado_saidas?.setor}))].filter(x=>x.data&&dentro(x.data)).sort((a,b)=>b.data.localeCompare(a.data)) }
     const condData = p.dataInicio && p.dataFim ? `AND date(data) BETWEEN date(@dataInicio) AND date(@dataFim)` : ''
     return db.prepare(`
       SELECT 'entrada' AS tipo, e.data, ei.quantidade, e.fornecedor_nome AS pessoa, e.numero_nota AS referencia
@@ -133,9 +163,10 @@ export function registerProdutosIpc() {
       JOIN almoxarifado_entradas e ON e.id = ei.entrada_id
       WHERE ei.produto_id = @produto_id ${condData.replace('data', 'e.data')}
       UNION ALL
-      SELECT 'saida' AS tipo, s.data, s.quantidade, s.retirado_por_nome AS pessoa, s.setor AS referencia
-      FROM almoxarifado_saidas s
-      WHERE s.produto_id = @produto_id ${condData.replace('data', 's.data')}
+      SELECT 'saida' AS tipo, s.data, si.quantidade, s.retirado_por_nome AS pessoa, s.setor AS referencia
+      FROM almoxarifado_saidas_itens si
+      JOIN almoxarifado_saidas s ON s.id = si.saida_id
+      WHERE si.produto_id = @produto_id ${condData.replace('data', 's.data')}
       ORDER BY data DESC
     `).all({ produto_id: p.produto_id, dataInicio: p.dataInicio ?? null, dataFim: p.dataFim ?? null })
   })
@@ -155,7 +186,19 @@ export function registerProdutosIpc() {
   // NOVO: ao cadastrar um material/ferramenta novo, o código não é
   // mais digitado — segue a sequência numérica automaticamente.
   ipcMain.handle('produtos:proximoCodigo', async (_e, empresa_id: number) => {
-    if(getDatabaseProvider()==='supabase') { const {data,error}=await getSupabase().from('produtos').select('codigo').eq('empresa_id',empresa_id);if(error)throw new Error(error.message);const maior=Math.max(0,...(data??[]).map(p=>Number(p.codigo.replace(/\D/g,''))||0));return String(maior+1).padStart(4,'0') }
+    if (getDatabaseProvider() === 'supabase') {
+      const { data, error } = await getSupabase().from('produtos').select('codigo').eq('empresa_id', empresa_id)
+      if (error) throw new Error(error.message)
+      const maior = Math.max(0, ...(data ?? []).map(p => Number(p.codigo.replace(/\D/g, '')) || 0))
+      // CORRIGIDO: estava retornando a string pronta em vez de
+      // { codigo: ... } (formato que o SQLite sempre retornou, e que
+      // o frontend espera — ProdutoModal.tsx faz `r.codigo`). Sem essa
+      // correção, `codigo` ficava undefined no formulário, e quebrava
+      // mais na frente com "Cannot read properties of undefined
+      // (reading 'trim')" ao tentar salvar. Também alinhei pra 3
+      // dígitos — estava em 4, diferente do padrão de sempre.
+      return { codigo: String(maior + 1).padStart(3, '0') }
+    }
     const maior = (db.prepare(`
       SELECT COALESCE(MAX(CAST(codigo AS INTEGER)), 0) AS maior
       FROM produtos
@@ -167,14 +210,14 @@ export function registerProdutosIpc() {
 
   // ── Criar ────────────────────────────────────────────────
   ipcMain.handle('produtos:criar', async (_e, p: ProdutoPayload) => {
-    if(getDatabaseProvider()==='supabase') { const {data,error}=await getSupabase().from('produtos').insert({...p,descricao:p.descricao??null,unidade:p.unidade??null,estoque_atual:p.estoque_atual??0,estoque_minimo:p.estoque_minimo??0,valor_unitario:p.valor_unitario??0,fornecedor_id:p.fornecedor_id??null,alugado:p.alugado?1:0,valor_aluguel:p.alugado?p.valor_aluguel??null:null,aluguel_periodo:p.alugado?p.aluguel_periodo??null:null,aluguel_vencimento:p.alugado?p.aluguel_vencimento??null:null}).select('id').single();if(error)throw new Error(error.message);return {id:data.id} }
+    if(getDatabaseProvider()==='supabase') { const {data,error}=await getSupabase().from('produtos').insert({...p,descricao:p.descricao??null,unidade:p.unidade??null,categoria:p.categoria??null,estoque_atual:p.estoque_atual??0,estoque_minimo:p.estoque_minimo??0,valor_unitario:p.valor_unitario??0,fornecedor_id:p.fornecedor_id??null,alugado:p.alugado?1:0,valor_aluguel:p.alugado?p.valor_aluguel??null:null,aluguel_periodo:p.alugado?p.aluguel_periodo??null:null,aluguel_vencimento:p.alugado?p.aluguel_vencimento??null:null}).select('id').single();if(error)throw new Error(error.message);return {id:data.id} }
     const result = db.prepare(`
       INSERT INTO produtos (
-        empresa_id, codigo, nome, descricao, unidade, estoque_atual, estoque_minimo, valor_unitario,
+        empresa_id, codigo, nome, descricao, unidade, categoria, estoque_atual, estoque_minimo, valor_unitario,
         fornecedor_id, alugado, valor_aluguel, aluguel_periodo, aluguel_vencimento
       )
       VALUES (
-        @empresa_id, @codigo, @nome, @descricao, @unidade, @estoque_atual, @estoque_minimo, @valor_unitario,
+        @empresa_id, @codigo, @nome, @descricao, @unidade, @categoria, @estoque_atual, @estoque_minimo, @valor_unitario,
         @fornecedor_id, @alugado, @valor_aluguel, @aluguel_periodo, @aluguel_vencimento
       )
     `).run({
@@ -183,6 +226,7 @@ export function registerProdutosIpc() {
       nome:           p.nome,
       descricao:      p.descricao ?? null,
       unidade:        p.unidade ?? null,
+      categoria:      p.categoria ?? null,
       estoque_atual:  p.estoque_atual ?? 0,
       estoque_minimo: p.estoque_minimo ?? 0,
       valor_unitario: p.valor_unitario ?? 0,
@@ -197,10 +241,10 @@ export function registerProdutosIpc() {
 
   // ── Atualizar ────────────────────────────────────────────
   ipcMain.handle('produtos:atualizar', async (_e, p: ProdutoPayload & { id: number }) => {
-    if(getDatabaseProvider()==='supabase') { const {id,...dados}=p;const {error}=await getSupabase().from('produtos').update({...dados,descricao:p.descricao??null,unidade:p.unidade??null,estoque_atual:p.estoque_atual??0,estoque_minimo:p.estoque_minimo??0,valor_unitario:p.valor_unitario??0,fornecedor_id:p.fornecedor_id??null,alugado:p.alugado?1:0,valor_aluguel:p.alugado?p.valor_aluguel??null:null,aluguel_periodo:p.alugado?p.aluguel_periodo??null:null,aluguel_vencimento:p.alugado?p.aluguel_vencimento??null:null}).eq('id',id);if(error)throw new Error(error.message);return {ok:true} }
+    if(getDatabaseProvider()==='supabase') { const {id,...dados}=p;const {error}=await getSupabase().from('produtos').update({...dados,descricao:p.descricao??null,unidade:p.unidade??null,categoria:p.categoria??null,estoque_atual:p.estoque_atual??0,estoque_minimo:p.estoque_minimo??0,valor_unitario:p.valor_unitario??0,fornecedor_id:p.fornecedor_id??null,alugado:p.alugado?1:0,valor_aluguel:p.alugado?p.valor_aluguel??null:null,aluguel_periodo:p.alugado?p.aluguel_periodo??null:null,aluguel_vencimento:p.alugado?p.aluguel_vencimento??null:null}).eq('id',id);if(error)throw new Error(error.message);return {ok:true} }
     db.prepare(`
       UPDATE produtos
-      SET codigo = @codigo, nome = @nome, descricao = @descricao, unidade = @unidade,
+      SET codigo = @codigo, nome = @nome, descricao = @descricao, unidade = @unidade, categoria = @categoria,
           estoque_atual = @estoque_atual, estoque_minimo = @estoque_minimo, valor_unitario = @valor_unitario,
           fornecedor_id = @fornecedor_id, alugado = @alugado, valor_aluguel = @valor_aluguel,
           aluguel_periodo = @aluguel_periodo, aluguel_vencimento = @aluguel_vencimento
@@ -211,6 +255,7 @@ export function registerProdutosIpc() {
       nome:           p.nome,
       descricao:      p.descricao ?? null,
       unidade:        p.unidade ?? null,
+      categoria:      p.categoria ?? null,
       estoque_atual:  p.estoque_atual ?? 0,
       estoque_minimo: p.estoque_minimo ?? 0,
       valor_unitario: p.valor_unitario ?? 0,
@@ -246,7 +291,18 @@ export function registerProdutosIpc() {
 
   // ── Excluir ──────────────────────────────────────────────
   ipcMain.handle('produtos:excluir', async (_e, id: number) => {
-    if(getDatabaseProvider()==='supabase') { const {error}=await getSupabase().from('produtos').delete().eq('id',id);if(error)throw new Error(error.message);return {ok:true} }
+    if(getDatabaseProvider()==='supabase') {
+      const s = getSupabase()
+      const { data: produto } = await s.from('produtos').select('nome,codigo,empresa_id').eq('id', id).single()
+      if (produto) {
+        await s.rpc('registrar_exclusao', {
+          p_tabela: 'produtos', p_registro_id: id,
+          p_descricao: `Material/Ferramenta - ${produto.nome} (código ${produto.codigo})`,
+          p_empresa_id: produto.empresa_id,
+        })
+      }
+      const {error}=await s.from('produtos').delete().eq('id',id);if(error)throw new Error(error.message);return {ok:true}
+    }
     db.prepare(`DELETE FROM produtos WHERE id = ?`).run(id)
     return { ok: true }
   })

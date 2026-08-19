@@ -1,6 +1,6 @@
 {
   "name": "otimizzai-financas",
-  "version": "1.0.0",
+  "version": "1.0.53",
   "description": "Sistema financeiro desktop — Otimizzai",
   "main": "dist-main/main.js",
   "author": {
@@ -23,6 +23,7 @@
     "build:preload": "tsc -p tsconfig.preload.json",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win",
+    "dist:win:publish": "npm run build && electron-builder --win --publish always",
     "lint": "eslint src --ext .ts,.tsx --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "db:reset": "node scripts/reset-db.js",
@@ -38,9 +39,12 @@
     "date-fns": "^3.6.0",
     "dotenv": "^16.6.1",
     "electron-updater": "^6.1.7",
+    "exceljs": "^4.4.0",
     "lucide-react": "^0.323.0",
     "nodemailer": "^9.0.3",
     "pdf-lib": "^1.17.1",
+    "pdf-parse": "1.1.1",
+    "pdf.js-extract": "^1.0.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.22.0",

@@ -33,6 +33,7 @@ const api = {
   // posterior da conversa (alterarSenha, remover no lugar de excluir).
   usuarios: {
     listar:       (empresa_id: number) => ipcRenderer.invoke('usuarios:listar',       empresa_id),
+    listarTodos:  () => ipcRenderer.invoke('usuarios:listarTodos'),
     buscarPorId:  (id: number)         => ipcRenderer.invoke('usuarios:buscarPorId',  id),
     login:        (p: unknown)         => ipcRenderer.invoke('usuarios:login',        p),
     alterarSenha: (p: unknown)         => ipcRenderer.invoke('usuarios:alterarSenha', p),
@@ -129,6 +130,55 @@ const api = {
     removerAnexo:           (id: number) => ipcRenderer.invoke('colaboradores:removerAnexo',           id),
   },
 
+  // ── Folha de Pagamento (Recursos Humanos) ───────────────
+  folhaPagamento: {
+    colaboradoresAtivos: (empresaId: number) => ipcRenderer.invoke('folhaPagamento:colaboradoresAtivos', empresaId),
+    listar:              (empresaId: number) => ipcRenderer.invoke('folhaPagamento:listar', empresaId),
+    buscarPorId:         (id: number)        => ipcRenderer.invoke('folhaPagamento:buscarPorId', id),
+    buscarPorCompetencia: (p: unknown)       => ipcRenderer.invoke('folhaPagamento:buscarPorCompetencia', p),
+    criar:               (p: unknown)        => ipcRenderer.invoke('folhaPagamento:criar', p),
+    atualizar:           (p: unknown)        => ipcRenderer.invoke('folhaPagamento:atualizar', p),
+    excluir:             (id: number)        => ipcRenderer.invoke('folhaPagamento:excluir', id),
+    exportarExcel:       (id: number)        => ipcRenderer.invoke('folhaPagamento:exportarExcel', id),
+    importarEspelhosPonto: () => ipcRenderer.invoke('folhaPagamento:importarEspelhosPonto'),
+  },
+
+  // ── Obra — Estrutura Analítica (EAP) ────────────────────
+  obraEap: {
+    listar:        (empresaId: number) => ipcRenderer.invoke('obraEap:listar', empresaId),
+    listarModelo:  ()                  => ipcRenderer.invoke('obraEap:listarModelo'),
+    criar:         (p: unknown)        => ipcRenderer.invoke('obraEap:criar', p),
+    atualizar:     (p: unknown)        => ipcRenderer.invoke('obraEap:atualizar', p),
+    excluir:       (id: number)        => ipcRenderer.invoke('obraEap:excluir', id),
+    clonarModelo:  (empresaId: number) => ipcRenderer.invoke('obraEap:clonarModelo', empresaId),
+  },
+
+  // ── Obra — Diário de Obra (RDO) ─────────────────────────
+  obraDiario: {
+    listar:                (empresaId: number) => ipcRenderer.invoke('obraDiario:listar', empresaId),
+    buscarPorData:         (p: unknown)        => ipcRenderer.invoke('obraDiario:buscarPorData', p),
+    buscarPorId:           (id: number)        => ipcRenderer.invoke('obraDiario:buscarPorId', id),
+    percentuaisAcumulados: (empresaId: number) => ipcRenderer.invoke('obraDiario:percentuaisAcumulados', empresaId),
+    todasAtividades:       (empresaId: number) => ipcRenderer.invoke('obraDiario:todasAtividades', empresaId),
+    selecionarFotos:       ()                  => ipcRenderer.invoke('obraDiario:selecionarFotos'),
+    urlFoto:               (caminho: string)   => ipcRenderer.invoke('obraDiario:urlFoto', caminho),
+    salvar:                (p: unknown)        => ipcRenderer.invoke('obraDiario:salvar', p),
+    excluir:               (id: number)        => ipcRenderer.invoke('obraDiario:excluir', id),
+  },
+
+  // ── Faturas — mensalidade de uso do sistema (boleto/Asaas) ──
+  faturas: {
+    listar:           (empresaId: number) => ipcRenderer.invoke('faturas:listar', empresaId),
+    statusAssinatura: (empresaId: number) => ipcRenderer.invoke('faturas:statusAssinatura', empresaId),
+    ativarAssinatura: (empresaId: number) => ipcRenderer.invoke('faturas:ativarAssinatura', empresaId),
+  },
+
+  // ── Contrato de Prestação de Serviços ───────────────────
+  contratos: {
+    buscarOuCriar: (empresaId: number) => ipcRenderer.invoke('contratos:buscarOuCriar', empresaId),
+    assinar:       (p: unknown)        => ipcRenderer.invoke('contratos:assinar', p),
+  },
+
   // ── Documentos (abre diálogo de impressão nativo) ───────
   documentos: {
     imprimir:           (p: unknown) => ipcRenderer.invoke('documentos:imprimir', p),
@@ -139,6 +189,7 @@ const api = {
     gerarLote:          (arquivos: unknown) => ipcRenderer.invoke('documentos:gerarLote', arquivos),
     gerarPdfsSeparados: (p: unknown) => ipcRenderer.invoke('documentos:gerarPdfsSeparados', p),
     carimbarPrimeiraPagina: (p: unknown) => ipcRenderer.invoke('documentos:carimbarPrimeiraPagina', p),
+    subirPdfStorage:    (p: unknown) => ipcRenderer.invoke('documentos:subirPdfStorage', p),
   },
 
   // ── Fornecedores ─────────────────────────────────────────
@@ -243,6 +294,7 @@ const api = {
   // ── Almoxarifado ───────────────────────────────────────────
   produtos: {
     listar:                (p: unknown) => ipcRenderer.invoke('produtos:listar',                p),
+    categorias:            (empresaId: number) => ipcRenderer.invoke('produtos:categorias',      empresaId),
     buscarPorCodigo:       (p: unknown) => ipcRenderer.invoke('produtos:buscarPorCodigo',        p),
     buscarPorId:           (id: number) => ipcRenderer.invoke('produtos:buscarPorId',            id),
     resumo:                (empresaId: number) => ipcRenderer.invoke('produtos:resumo',          empresaId),
@@ -299,6 +351,7 @@ const api = {
     definirObrasSupervisor: (p: unknown) => ipcRenderer.invoke('master:definirObrasSupervisor', p),
     obras:        () => ipcRenderer.invoke('master:obras'),
     obraDetalhe:  (empresaId: number) => ipcRenderer.invoke('master:obraDetalhe', empresaId),
+    listarExclusoes: () => ipcRenderer.invoke('master:listarExclusoes'),
   },
 
   // ── Solicitações ao Setor Pessoal ────────────────────────

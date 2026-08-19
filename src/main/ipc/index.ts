@@ -32,6 +32,11 @@ import { registerSupabaseIpc } from './supabase.ipc'
 import { registerSupervisorPainelIpc } from './supervisorPainel.ipc'
 import { registerRecuperacaoSenhaIpc } from './recuperacaoSenha.ipc'
 import { registerConfiguracoesEmailIpc } from './configuracoesEmail.ipc'
+import { registerFolhaPagamentoIpc } from './folhaPagamento.ipc'
+import { registerObraEapIpc } from './obraEap.ipc'
+import { registerObraDiarioIpc } from './obraDiario.ipc'
+import { registerFaturasIpc } from './faturas.ipc'
+import { registerContratosIpc } from './contratos.ipc'
 
 export function registerAllIpc() {
   registerAppIpc()
@@ -68,4 +73,9 @@ export function registerAllIpc() {
   registerSupervisorPainelIpc()
   registerRecuperacaoSenhaIpc()
   registerConfiguracoesEmailIpc()
+  registerFolhaPagamentoIpc()
+  registerObraEapIpc()
+  registerObraDiarioIpc()
+  registerFaturasIpc()
+  registerContratosIpc()
 }

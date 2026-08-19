@@ -198,6 +198,7 @@ export default function NotaFiscalModal({ nota, onClose, onSaved }: Props) {
           notaArquivos:   anexosNota.map(a => a.caminho),
           boletoArquivos: anexosBoletos.map(a => a.caminho),
           pastaId:        `NF_${notaId}`,
+          empresa_id:     empresaId,
         })
         if (resultadoPdfs.ok) {
           await window.api.notasFiscais.salvarCaminhosPdf({

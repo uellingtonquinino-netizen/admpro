@@ -25,7 +25,7 @@ export default function MasterConfiguracoesEmail() {
   const [usuarioSmtp, setUsuarioSmtp] = useState('')
   const [senhaSmtp, setSenhaSmtp] = useState('')
   const [seguro, setSeguro] = useState(true)
-  const [remetenteNome, setRemetenteNome] = useState('ADM PRO')
+  const [remetenteNome, setRemetenteNome] = useState('ADM OBRA')
   const [remetenteEmail, setRemetenteEmail] = useState('')
   const [salvando, setSalvando] = useState(false)
 
@@ -40,7 +40,7 @@ export default function MasterConfiguracoesEmail() {
         setUsuarioSmtp(c.smtp_usuario ?? '')
         setSenhaSmtp(c.smtp_senha ?? '')
         setSeguro(!!c.smtp_seguro)
-        setRemetenteNome(c.remetente_nome ?? 'ADM PRO')
+        setRemetenteNome(c.remetente_nome ?? 'ADM OBRA')
         setRemetenteEmail(c.remetente_email ?? '')
       }
       setCarregado(true)

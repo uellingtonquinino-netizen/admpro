@@ -41,14 +41,49 @@ export function registerUsuariosIpc() {
   // ALTERADO: agora também devolve as permissões extras de cada
   // usuário (páginas liberadas além do que o perfil já dá).
   ipcMain.handle('usuarios:listar', (_e, empresa_id: number) => {
+    // CORRIGIDO: só buscava quem tem essa obra como "casa"
+    // (empresa_id), nunca quem foi vinculado depois como obra EXTRA
+    // (usuario_obras) — mesma correção do lado Supabase.
+    const usuarios = db.prepare(`
+      SELECT DISTINCT
+        u.id, u.nome, u.email, u.perfil, u.ativo,
+        u.created_at, u.last_login_at
+      FROM usuarios u
+      LEFT JOIN usuario_obras uo ON uo.usuario_id = u.id
+      WHERE u.empresa_id = ? OR uo.empresa_id = ?
+      ORDER BY u.nome ASC
+    `).all(empresa_id, empresa_id) as { id: number }[]
+
+    const buscarExtras  = db.prepare(`SELECT chave FROM usuario_permissoes_extras WHERE usuario_id = ? AND negada = 0`)
+    const buscarNegadas = db.prepare(`SELECT chave FROM usuario_permissoes_extras WHERE usuario_id = ? AND negada = 1`)
+    const buscarObras   = db.prepare(`SELECT empresa_id FROM supervisor_obras WHERE usuario_id = ?`)
+    const buscarObrasExtras = db.prepare(`SELECT empresa_id FROM usuario_obras WHERE usuario_id = ?`)
+    return usuarios.map(u => ({
+      ...u,
+      permissoes_extras:  (buscarExtras.all(u.id) as { chave: string }[]).map(r => r.chave),
+      permissoes_negadas: (buscarNegadas.all(u.id) as { chave: string }[]).map(r => r.chave),
+      obras_supervisor:  (buscarObras.all(u.id) as { empresa_id: number }[]).map(r => r.empresa_id),
+      obras_extras:      (buscarObrasExtras.all(u.id) as { empresa_id: number }[]).map(r => r.empresa_id),
+    }))
+  })
+
+  // ── Listar TODOS os usuários, de todas as obras (Master) ──
+  // NOVO: a listagem normal (usuarios:listar) é presa a UMA obra —
+  // ótimo pro ADM, que só mexe na obra dele, mas o Master precisa
+  // enxergar todo mundo de uma vez, não importa a obra "dona" do
+  // cadastro, pra achar um usuário já existente e vincular ele a mais
+  // uma obra sem precisar ficar trocando de obra até encontrar onde
+  // esse usuário mora.
+  ipcMain.handle('usuarios:listarTodos', () => {
     const usuarios = db.prepare(`
       SELECT
-        id, nome, email, perfil, ativo,
-        created_at, last_login_at
-      FROM usuarios
-      WHERE empresa_id = ?
-      ORDER BY nome ASC
-    `).all(empresa_id) as { id: number }[]
+        u.id, u.nome, u.email, u.perfil, u.ativo,
+        u.created_at, u.last_login_at, u.empresa_id,
+        e.nome AS empresa_nome
+      FROM usuarios u
+      JOIN empresas e ON e.id = u.empresa_id
+      ORDER BY u.nome ASC
+    `).all() as { id: number }[]
 
     const buscarExtras  = db.prepare(`SELECT chave FROM usuario_permissoes_extras WHERE usuario_id = ? AND negada = 0`)
     const buscarNegadas = db.prepare(`SELECT chave FROM usuario_permissoes_extras WHERE usuario_id = ? AND negada = 1`)

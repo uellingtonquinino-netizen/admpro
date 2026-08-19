@@ -13,7 +13,7 @@ import ConfirmDialog            from '@components/ui/ConfirmDialog'
 import { SkeletonTable }        from '@components/ui/Skeleton'
 import EmptyState               from '@components/ui/EmptyState'
 import ProdutoModal             from '@components/almoxarifado/ProdutoModal'
-import { Search, Plus, Pencil, Trash2, PackageX, PackageMinus, Wallet, Boxes } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, PackageX, PackageMinus, Wallet, Boxes, Download, Upload } from 'lucide-react'
 
 interface Produto {
   id:              number
@@ -21,6 +21,7 @@ interface Produto {
   nome:            string
   descricao:       string | null
   unidade:         string | null
+  categoria:       string | null
   estoque_atual:   number
   estoque_minimo:  number
   valor_unitario:  number
@@ -55,7 +56,10 @@ export default function Almoxarifado() {
   const [resumo, setResumo]     = useState<Resumo | null>(null)
   const [loading, setLoading]   = useState(true)
   const [busca, setBusca]       = useState('')
+  const [categoriaFiltro, setCategoriaFiltro] = useState('')
+  const [categorias, setCategorias] = useState<string[]>([])
   const [modalOpen, setModalOpen] = useState(false)
+  const [importando, setImportando] = useState(false)
   const [editando, setEditando] = useState<Produto | null>(null)
 
   const buscaDebounced = useDebounce(busca, 350)
@@ -63,10 +67,15 @@ export default function Almoxarifado() {
   const carregar = useCallback(() => {
     if (!empresaId) return
     setLoading(true)
-    window.api.produtos.listar({ empresa_id: empresaId, busca: buscaDebounced || undefined })
+    window.api.produtos.listar({ empresa_id: empresaId, busca: buscaDebounced || undefined, categoria: categoriaFiltro || undefined })
       .then(setProdutos)
       .finally(() => setLoading(false))
-  }, [empresaId, buscaDebounced])
+  }, [empresaId, buscaDebounced, categoriaFiltro])
+
+  useEffect(() => {
+    if (!empresaId) return
+    window.api.produtos.categorias(empresaId).then(setCategorias)
+  }, [empresaId])
 
   const carregarResumo = useCallback(() => {
     if (!empresaId) return
@@ -90,6 +99,37 @@ export default function Almoxarifado() {
   function atualizarTudo() {
     carregar()
     carregarResumo()
+  }
+
+  async function handleBaixarModelo() {
+    try {
+      const result = await window.api.importacao.gerarModeloProdutos()
+      if (result.ok) toast.success('Modelo salvo.')
+    } catch {
+      toast.error('Erro ao gerar o modelo.')
+    }
+  }
+
+  async function handleImportar() {
+    if (!empresaId) return
+    setImportando(true)
+    try {
+      const result = await window.api.importacao.importarProdutos({ empresa_id: empresaId })
+      if (result.canceled) return
+      if (result.ok) {
+        toast.success(
+          `Importação concluída: ${result.criados} novo(s), ${result.atualizados} atualizado(s)` +
+          (result.ignorados ? `, ${result.ignorados} linha(s) sem nome ignorada(s)` : '') + '.'
+        )
+        atualizarTudo()
+      } else {
+        toast.error('Erro ao importar a planilha.')
+      }
+    } catch (erro) {
+      toast.error(`Erro ao importar a planilha: ${erro instanceof Error ? erro.message : String(erro)}`)
+    } finally {
+      setImportando(false)
+    }
   }
 
   function handleNovo() {
@@ -122,9 +162,26 @@ export default function Almoxarifado() {
     <div>
       <PageHeader title="Almoxarifado" subtitle="Estoque de materiais e ferramentas">
         {!somenteLeitura && (
-          <Button icon={<Plus size={15} />} onClick={handleNovo}>
-            Novo Material/Ferramenta
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              icon={<Download size={15} />}
+              onClick={handleBaixarModelo}
+            >
+              Baixar modelo Excel
+            </Button>
+            <Button
+              variant="outline"
+              icon={<Upload size={15} />}
+              onClick={handleImportar}
+              loading={importando}
+            >
+              Importar Excel
+            </Button>
+            <Button icon={<Plus size={15} />} onClick={handleNovo}>
+              Novo Material/Ferramenta
+            </Button>
+          </>
         )}
       </PageHeader>
 
@@ -181,13 +238,23 @@ export default function Almoxarifado() {
         </div>
       </div>
 
-      <Input
-        icon={<Search size={14} />}
-        placeholder="Buscar por código ou nome…"
-        value={busca}
-        onChange={e => setBusca(e.target.value)}
-        className="mb-4"
-      />
+      <div className="flex gap-3 mb-4">
+        <Input
+          icon={<Search size={14} />}
+          placeholder="Buscar por código ou nome…"
+          value={busca}
+          onChange={e => setBusca(e.target.value)}
+          className="flex-1"
+        />
+        <select
+          value={categoriaFiltro}
+          onChange={e => setCategoriaFiltro(e.target.value)}
+          className="bg-surface border border-surface-border rounded-xl px-3 text-sm text-gray-200 min-w-[180px]"
+        >
+          <option value="">Todas as categorias</option>
+          {categorias.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
 
       {loading ? (
         <SkeletonTable rows={6} />
@@ -198,7 +265,7 @@ export default function Almoxarifado() {
           description={busca ? 'Ajuste a busca acima.' : somenteLeitura ? 'Nenhum material/ferramenta encontrado.' : 'Clique em "Novo Material/Ferramenta" para começar.'}
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">
@@ -211,7 +278,10 @@ export default function Almoxarifado() {
               {produtos.map(p => (
                 <tr key={p.id} className="border-b border-surface-border/50 hover:bg-surface-hover transition-colors">
                   <td className="px-4 py-3 text-gray-400">{p.codigo}</td>
-                  <td className="px-4 py-3 text-gray-200">{p.nome}</td>
+                  <td className="px-4 py-3 text-gray-200">
+                    {p.nome}
+                    {p.categoria && <span className="block text-xs text-gray-500 mt-0.5">{p.categoria}</span>}
+                  </td>
                   <td className="px-4 py-3 text-gray-400">{p.unidade ?? '—'}</td>
                   <td className={`px-4 py-3 font-medium ${
                     p.estoque_atual <= 0 ? 'text-red-400'

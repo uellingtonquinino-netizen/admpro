@@ -57,6 +57,12 @@ export function runMigrations(db: Database.Database): void {
   if (applied < 40) { migration_040(db); markDone(db, 40) }
   if (applied < 41) { migration_041(db); markDone(db, 41) }
   if (applied < 42) { migration_042(db); markDone(db, 42) }
+  if (applied < 43) { migration_043(db); markDone(db, 43) }
+  if (applied < 44) { migration_044(db); markDone(db, 44) }
+  if (applied < 45) { migration_045(db); markDone(db, 45) }
+  if (applied < 46) { migration_046(db); markDone(db, 46) }
+  if (applied < 47) { migration_047(db); markDone(db, 47) }
+  if (applied < 48) { migration_048(db); markDone(db, 48) }
 
   console.log('[DB] Migrations OK')
 }
@@ -1616,5 +1622,159 @@ function migration_042(db: Database.Database) {
     if (!colunas.has('aprovado_supervisor_por_usuario_id')) {
       db.exec(`ALTER TABLE ${tabela} ADD COLUMN aprovado_supervisor_por_usuario_id INTEGER REFERENCES usuarios(id)`)
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// migration_043 — Acréscimo na Entrada de Almoxarifado, além do
+// desconto que já existia (pedido do usuário).
+// ─────────────────────────────────────────────────────────
+function migration_043(db: Database.Database) {
+  const colunas = new Set(
+    (db.prepare(`PRAGMA table_info(almoxarifado_entradas)`).all() as { name: string }[]).map(c => c.name)
+  )
+  if (!colunas.has('valor_acrescimo')) {
+    db.exec(`ALTER TABLE almoxarifado_entradas ADD COLUMN valor_acrescimo REAL NOT NULL DEFAULT 0`)
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// migration_044 — Categoria no cadastro de Material/Ferramenta
+// (pedido do usuário, pra filtrar por categoria no Painel Inicial).
+// ─────────────────────────────────────────────────────────
+function migration_044(db: Database.Database) {
+  const colunas = new Set(
+    (db.prepare(`PRAGMA table_info(produtos)`).all() as { name: string }[]).map(c => c.name)
+  )
+  if (!colunas.has('categoria')) {
+    db.exec(`ALTER TABLE produtos ADD COLUMN categoria TEXT`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_produtos_categoria ON produtos(empresa_id, categoria)`)
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// migration_045 — Saída do Almoxarifado passa a aceitar vários
+// materiais/ferramentas de uma vez, igual já era a Entrada (antes só
+// dava pra dar saída de um item por vez). Usa "recriar tabela" em vez
+// de DROP COLUMN — mais portável entre versões do SQLite.
+// ─────────────────────────────────────────────────────────
+function migration_045(db: Database.Database) {
+  const colunas = new Set(
+    (db.prepare(`PRAGMA table_info(almoxarifado_saidas)`).all() as { name: string }[]).map(c => c.name)
+  )
+  // Se "produto_id" não existe mais na tabela, essa migration já rodou.
+  if (!colunas.has('produto_id')) return
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS almoxarifado_saidas_itens (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      saida_id        INTEGER NOT NULL REFERENCES almoxarifado_saidas(id) ON DELETE CASCADE,
+      produto_id      INTEGER NOT NULL REFERENCES produtos(id),
+      produto_codigo  TEXT    NOT NULL,
+      produto_nome    TEXT    NOT NULL,
+      quantidade      REAL    NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_almox_saidas_itens_saida
+      ON almoxarifado_saidas_itens(saida_id);
+
+    CREATE TABLE almoxarifado_saidas_novo (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      empresa_id          INTEGER NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      data                TEXT    NOT NULL,
+      retirado_por_tipo   TEXT    NOT NULL DEFAULT 'colaborador',
+      retirado_por_id     INTEGER,
+      retirado_por_nome   TEXT    NOT NULL,
+      setor               TEXT,
+      solicitado_por_id   INTEGER REFERENCES colaboradores(id) ON DELETE SET NULL,
+      solicitado_por_nome TEXT,
+      liberado_por        TEXT,
+      pdf_path            TEXT,
+      created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `)
+
+  // Migra o que já existir (fica pra trás na tabela antiga, cada
+  // linha existente vira uma saída com 1 item na tabela nova de itens).
+  const existentes = db.prepare(`SELECT * FROM almoxarifado_saidas`).all() as Record<string, unknown>[]
+  const inserirCabecalho = db.prepare(`
+    INSERT INTO almoxarifado_saidas_novo
+      (id, empresa_id, data, retirado_por_tipo, retirado_por_id, retirado_por_nome, setor,
+       solicitado_por_id, solicitado_por_nome, liberado_por, pdf_path, created_at)
+    VALUES
+      (@id, @empresa_id, @data, @retirado_por_tipo, @retirado_por_id, @retirado_por_nome, @setor,
+       @solicitado_por_id, @solicitado_por_nome, @liberado_por, @pdf_path, @created_at)
+  `)
+  const inserirItem = db.prepare(`
+    INSERT INTO almoxarifado_saidas_itens (saida_id, produto_id, produto_codigo, produto_nome, quantidade)
+    VALUES (@saida_id, @produto_id, @produto_codigo, @produto_nome, @quantidade)
+  `)
+  for (const linha of existentes) {
+    inserirCabecalho.run(linha)
+    inserirItem.run({
+      saida_id: linha.id, produto_id: linha.produto_id, produto_codigo: linha.produto_codigo,
+      produto_nome: linha.produto_nome, quantidade: linha.quantidade,
+    })
+  }
+
+  db.exec(`
+    DROP TABLE almoxarifado_saidas;
+    ALTER TABLE almoxarifado_saidas_novo RENAME TO almoxarifado_saidas;
+  `)
+}
+
+// ─────────────────────────────────────────────────────────
+// migration_046 — Data de emissão editável na AP (antes só existia
+// created_at, hora técnica do registro no banco, sem dar pra ajustar).
+// ─────────────────────────────────────────────────────────
+function migration_046(db: Database.Database) {
+  const colunas = new Set(
+    (db.prepare(`PRAGMA table_info(autorizacoes_pagamento)`).all() as { name: string }[]).map(c => c.name)
+  )
+  if (!colunas.has('data_emissao')) {
+    db.exec(`ALTER TABLE autorizacoes_pagamento ADD COLUMN data_emissao TEXT`)
+    db.exec(`UPDATE autorizacoes_pagamento SET data_emissao = date(created_at) WHERE data_emissao IS NULL`)
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// migration_047 — Código/matrícula do colaborador (pedido do
+// usuário, pra aparecer no Comunicado de Dispensa ao Setor Pessoal).
+// Sequencial por empresa, gerado automático — mesma lógica de código
+// já usada em produtos do Almoxarifado.
+// ─────────────────────────────────────────────────────────
+function migration_047(db: Database.Database) {
+  const colunas = new Set(
+    (db.prepare(`PRAGMA table_info(colaboradores)`).all() as { name: string }[]).map(c => c.name)
+  )
+  if (!colunas.has('codigo')) {
+    db.exec(`ALTER TABLE colaboradores ADD COLUMN codigo TEXT`)
+
+    // Preenche quem já existe com um código sequencial (por empresa,
+    // seguindo a ordem de cadastro) — assim ninguém fica sem código.
+    const empresas = db.prepare(`SELECT DISTINCT empresa_id FROM colaboradores`).all() as { empresa_id: number }[]
+    const atualizarCodigo = db.prepare(`UPDATE colaboradores SET codigo = ? WHERE id = ?`)
+    for (const { empresa_id } of empresas) {
+      const colaboradoresDaEmpresa = db.prepare(
+        `SELECT id FROM colaboradores WHERE empresa_id = ? ORDER BY id ASC`
+      ).all(empresa_id) as { id: number }[]
+      colaboradoresDaEmpresa.forEach((c, i) => {
+        atualizarCodigo.run(String(i + 1).padStart(4, '0'), c.id)
+      })
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// migration_048 — Marca se um anexo da AP também recebe o carimbo de
+// aprovação (pedido do usuário: assinar a AP e a Nota Fiscal/boletim
+// de medição anexado junto, no mesmo carimbo).
+// ─────────────────────────────────────────────────────────
+function migration_048(db: Database.Database) {
+  const colunas = new Set(
+    (db.prepare(`PRAGMA table_info(autorizacoes_pagamento_anexos)`).all() as { name: string }[]).map(c => c.name)
+  )
+  if (!colunas.has('vai_assinatura')) {
+    db.exec(`ALTER TABLE autorizacoes_pagamento_anexos ADD COLUMN vai_assinatura INTEGER NOT NULL DEFAULT 0`)
   }
 }

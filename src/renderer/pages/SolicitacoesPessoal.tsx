@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useEmpresaStore } from '@store/empresa.store'
+import { useAuthStore }    from '@store/auth.store'
+import { useConfirm }      from '@hooks/useConfirm'
 import { toast }           from '@components/ui/ToastContainer'
 import Button               from '@components/ui/Button'
 import Badge                from '@components/ui/Badge'
+import ConfirmDialog        from '@components/ui/ConfirmDialog'
 import {
-  FileSignature, Paperclip, ChevronDown, ChevronUp, CheckCircle2,
+  FileSignature, Paperclip, ChevronDown, ChevronUp, CheckCircle2, Trash2,
 } from 'lucide-react'
 
 interface Anexo { id: number; caminho: string; nome: string; origem: string }
@@ -37,6 +40,8 @@ function badgeStatus(status: string) {
 
 export default function SolicitacoesPessoal() {
   const empresaId = useEmpresaStore(s => s.empresaId)
+  const usuario    = useAuthStore(s => s.usuario)
+  const { confirm, dialogProps } = useConfirm()
   const [itens, setItens] = useState<Solicitacao[]>([])
   const [loading, setLoading] = useState(true)
   const [aberta, setAberta] = useState<number | null>(null)
@@ -67,6 +72,23 @@ export default function SolicitacoesPessoal() {
       carregar()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro ao concluir.')
+    }
+  }
+
+  // NOVO: excluir uma solicitação — acesso ADM.
+  async function handleExcluir(s: Solicitacao) {
+    const ok = await confirm({
+      title:   'Excluir solicitação',
+      message: `Deseja excluir a solicitação de ${TIPO_LABEL[s.tipo] ?? s.tipo} de "${s.colaborador_nome}"? Os anexos enviados junto também serão apagados.`,
+      danger:  true,
+    })
+    if (!ok) return
+    try {
+      await window.api.solicitacoesPessoal.excluir(s.id)
+      toast.success('Solicitação excluída.')
+      carregar()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir.')
     }
   }
 
@@ -145,17 +167,26 @@ export default function SolicitacoesPessoal() {
                     )}
                   </div>
 
-                  {s.status === 'respondido' && (
-                    <Button size="sm" icon={<CheckCircle2 size={13} />} onClick={() => handleConcluir(s.id)}>
-                      Marcar como baixado / arquivado
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {s.status === 'respondido' && (
+                      <Button size="sm" icon={<CheckCircle2 size={13} />} onClick={() => handleConcluir(s.id)}>
+                        Marcar como baixado / arquivado
+                      </Button>
+                    )}
+                    {usuario?.perfil === 'admin' && (
+                      <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => handleExcluir(s)}>
+                        Excluir
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
+
+      <ConfirmDialog {...dialogProps} />
     </div>
   )
 }

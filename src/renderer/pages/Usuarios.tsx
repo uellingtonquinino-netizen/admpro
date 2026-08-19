@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useNavigate }                       from 'react-router-dom'
 import { useEmpresaStore }                   from '@store/empresa.store'
 import { useAuthStore }                      from '@store/auth.store'
 import { toast }                             from '@components/ui/ToastContainer'
@@ -9,7 +10,8 @@ import ModalNovoUsuario                      from '@components/usuarios/ModalNov
 import ModalEditarUsuario                    from '@components/usuarios/ModalEditarUsuario'
 import ConfirmDialog                         from '@components/ui/ConfirmDialog'
 import { SkeletonTable }                     from '@components/ui/Skeleton'
-import { UserPlus, Pencil, Trash2 }          from 'lucide-react'
+import Input                                 from '@components/ui/Input'
+import { UserPlus, Pencil, Trash2, Search, ArrowLeft } from 'lucide-react'
 import { clsx }                              from 'clsx'
 
 export interface Usuario {
@@ -24,6 +26,8 @@ export interface Usuario {
   permissoes_negadas: string[]
   obras_supervisor: number[]
   obras_extras: number[]
+  empresa_id?:   number
+  empresa_nome?: string
 }
 
 const PERFIL_LABEL = {
@@ -45,30 +49,48 @@ const PERFIL_COLOR = {
 } as const
 
 export default function Usuarios() {
+  const navigate      = useNavigate()
   const empresaId    = useEmpresaStore(s => s.empresaId)
   const usuarioLogado = useAuthStore(s => s.usuario)
 
   const [usuarios,  setUsuarios]  = useState<Usuario[]>([])
+  const [busca,     setBusca]     = useState('')
   const [loading,   setLoading]   = useState(true)
   const [modalNovo, setModalNovo] = useState(false)
   const [editando,  setEditando]  = useState<Usuario | null>(null)
   const [removendo, setRemovendo] = useState<Usuario | null>(null)
 
+  // NOVO: o Master vê todo mundo, de todas as obras, de uma vez — é
+  // ele quem precisa achar um usuário já existente (não importa a
+  // obra "dona" do cadastro) pra vincular a mais uma obra. ADM/Gestor
+  // continuam vendo só a obra selecionada no momento, como sempre.
+  const ehMaster = usuarioLogado?.perfil === 'master'
+
   // ── Buscar ────────────────────────────────────────────
   const fetchUsuarios = useCallback(async () => {
-    if (!empresaId) return
+    if (!ehMaster && !empresaId) return
     setLoading(true)
     try {
-      const data = await window.api.usuarios.listar(empresaId)
+      const data = ehMaster
+        ? await window.api.usuarios.listarTodos()
+        : await window.api.usuarios.listar(empresaId!)
       setUsuarios(data as Usuario[])
     } catch {
       toast.error('Erro ao carregar usuários.')
     } finally {
       setLoading(false)
     }
-  }, [empresaId])
+  }, [empresaId, ehMaster])
 
   useEffect(() => { fetchUsuarios() }, [fetchUsuarios])
+
+  const usuariosFiltrados = ehMaster && busca.trim()
+    ? usuarios.filter(u =>
+        u.nome.toLowerCase().includes(busca.toLowerCase()) ||
+        u.email.toLowerCase().includes(busca.toLowerCase()) ||
+        (u.empresa_nome ?? '').toLowerCase().includes(busca.toLowerCase())
+      )
+    : usuarios
 
   // ── Remover ───────────────────────────────────────────
   async function handleRemover() {
@@ -85,9 +107,18 @@ export default function Usuarios() {
 
   return (
     <div>
+      {ehMaster && (
+        <button
+          onClick={() => navigate('/master')}
+          className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-300 mb-4 transition-colors"
+        >
+          <ArrowLeft size={14} /> Voltar
+        </button>
+      )}
+
       <PageHeader
         title="Usuários"
-        subtitle="Gerencie quem tem acesso a esta empresa"
+        subtitle={ehMaster ? 'Todos os usuários, de todas as obras' : 'Gerencie quem tem acesso a esta empresa'}
       >
         {(usuarioLogado?.perfil === 'admin' || usuarioLogado?.perfil === 'master') && (
           <Button
@@ -99,14 +130,26 @@ export default function Usuarios() {
         )}
       </PageHeader>
 
+      {ehMaster && (
+        <Input
+          icon={<Search size={14} />}
+          placeholder="Buscar por nome, e-mail ou obra…"
+          value={busca}
+          onChange={e => setBusca(e.target.value)}
+          className="mb-4 max-w-md"
+        />
+      )}
+
       {/* Tabela */}
       <div className="bg-surface border border-surface-border
-                      rounded-xl overflow-hidden">
+                      rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-surface-border">
-              {['Nome', 'E-mail', 'Perfil', 'Status',
-                'Último acesso', ''].map(h => (
+              {(ehMaster
+                ? ['Nome', 'E-mail', 'Obra', 'Perfil', 'Status', 'Último acesso', '']
+                : ['Nome', 'E-mail', 'Perfil', 'Status', 'Último acesso', '']
+              ).map(h => (
                 <th
                   key={h}
                   className="px-4 py-3 text-left text-xs
@@ -120,8 +163,8 @@ export default function Usuarios() {
 
           <tbody>
             {loading
-              ? <SkeletonTable rows={4} cols={6} />
-              : usuarios.map(u => (
+              ? <SkeletonTable rows={4} cols={ehMaster ? 7 : 6} />
+              : usuariosFiltrados.map(u => (
                   <tr
                     key={u.id}
                     className="border-b border-surface-border/50
@@ -149,6 +192,11 @@ export default function Usuarios() {
                     {/* E-mail */}
                     <td className="px-4 py-3 text-gray-400">{u.email}</td>
 
+                    {/* Obra (só na visão global do Master) */}
+                    {ehMaster && (
+                      <td className="px-4 py-3 text-gray-400">{u.empresa_nome ?? '—'}</td>
+                    )}
+
                     {/* Perfil */}
                     <td className="px-4 py-3">
                       <Badge color={PERFIL_COLOR[u.perfil]}>
@@ -166,7 +214,7 @@ export default function Usuarios() {
                     {/* Último acesso */}
                     <td className="px-4 py-3 text-gray-500 text-xs">
                       {u.last_login_at
-                        ? new Date(u.last_login_at).toLocaleDateString('pt-BR')
+                        ? new Date(u.last_login_at).toLocaleString('pt-BR')
                         : 'Nunca acessou'}
                     </td>
 
@@ -201,9 +249,9 @@ export default function Usuarios() {
           </tbody>
         </table>
 
-        {!loading && usuarios.length === 0 && (
+        {!loading && usuariosFiltrados.length === 0 && (
           <div className="py-16 text-center text-sm text-gray-500">
-            Nenhum usuário cadastrado.
+            {busca ? 'Nenhum usuário encontrado pra essa busca.' : 'Nenhum usuário cadastrado.'}
           </div>
         )}
       </div>

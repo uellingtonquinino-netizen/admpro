@@ -14,6 +14,7 @@ interface CriarPayload {
   logo_url?: string | null
   solicitante_padrao?: string | null
   autorizado_por_padrao?: string | null
+  codigo_empresa?: string | null
 }
 
 interface AtualizarPayload extends CriarPayload { id: number }
@@ -28,6 +29,7 @@ function normalizar(payload: CriarPayload) {
     logo_url: payload.logo_url ?? null,
     solicitante_padrao: payload.solicitante_padrao ?? null,
     autorizado_por_padrao: payload.autorizado_por_padrao ?? null,
+    codigo_empresa: payload.codigo_empresa ?? null,
   }
 }
 

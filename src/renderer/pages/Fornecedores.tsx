@@ -144,7 +144,7 @@ export default function Fornecedores() {
           action={{ label: 'Novo fornecedor', onClick: handleNovo }}
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">

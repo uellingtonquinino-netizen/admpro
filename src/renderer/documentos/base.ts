@@ -10,6 +10,7 @@ export interface EmpresaDoc {
 export interface ColaboradorDoc {
   id:                number
   nome:              string
+  codigo?:           string | null
   cpf?:              string | null
   rg?:               string | null
   rg_orgao_emissor?: string | null

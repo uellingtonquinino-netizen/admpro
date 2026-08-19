@@ -1,8 +1,21 @@
-import 'dotenv/config'
 import { app, BrowserWindow, shell, Menu } from 'electron'
 import { join }                       from 'path'
+import dotenv                         from 'dotenv'
+
+// RESTAURADO: isso também tinha se perdido junto com o autoUpdater
+// na correção do F12 — é o motivo real dos dados "sumindo" no
+// programa instalado (mas aparecendo certinho no `npm run dev`).
+// `import 'dotenv/config'` sozinho procura o .env relativo à pasta
+// de onde o .exe foi aberto, que no Windows não é confiável. Em
+// produção, o .env precisa estar dentro de resourcesPath (empacotado
+// via extraResources no electron-builder.yml) e ser carregado de lá
+// explicitamente — senão DATABASE_PROVIDER/SUPABASE_URL ficam vazios
+// e o app cai pro SQLite local (vazio/desatualizado) sem avisar nada.
+dotenv.config({ path: app.isPackaged ? join(process.resourcesPath, '.env') : undefined })
+
 import { registerAllIpc }             from './ipc'
 import { initDatabase }               from './database/connection'
+import { autoUpdater }                from 'electron-updater'
 
 // NOVO: remove a barra de menu nativa (File, Edit, View, Window, Help)
 // — não é usada neste app e só ocupava espaço na tela.
@@ -53,6 +66,33 @@ app.whenReady().then(() => {
   initDatabase()
   registerAllIpc()
   createWindow()
+
+  // RESTAURADO: código de autoatualização que sumiu do main.ts (não
+  // tinha sido enviado pro GitHub, se perdeu numa correção anterior
+  // que só mexeu no F12 sem querer sobrescrever isso). Confere
+  // assim que o app abre; se achar uma versão nova, baixa sozinho e
+  // avisa quando terminar, perguntando se quer reiniciar já pra
+  // instalar (ou só na próxima vez que fechar o programa).
+  // Repositório do GitHub é PÚBLICO — o autoUpdater não precisa de
+  // nenhum token pra checar/baixar atualização (chegou a ser testado
+  // como privado, mas voltou atrás por causa de limitações do
+  // electron-updater com esse cenário — ver electron-builder.yml).
+  //
+  // ALTERADO: atualização 100% automática e silenciosa agora — sem
+  // nenhuma pergunta ao usuário. Baixa sozinho em segundo plano e
+  // instala sozinho na próxima vez que o programa for fechado
+  // normalmente (mesmo comportamento do Chrome/Slack) — ninguém
+  // precisa clicar em nada nem "concordar" com a atualização. Os
+  // avisos de diagnóstico (checando/achou/não achou) que existiam
+  // antes eram temporários só pra confirmar que estava funcionando —
+  // removidos agora que já foi confirmado.
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdates()
+
+    autoUpdater.on('error', (erro) => {
+      console.error('Erro ao verificar atualização:', erro.message)
+    })
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

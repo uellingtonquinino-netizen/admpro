@@ -8,6 +8,8 @@ import AppLayout                    from '@components/layout/AppLayout'
 import Dashboard     from '@pages/Dashboard'
 import Colaboradores from '@pages/Colaboradores'
 import RelatoriosRH  from '@pages/RelatoriosRH'
+import FolhaPagamento from '@pages/FolhaPagamento'
+import FolhaPagamentoEditor from '@pages/FolhaPagamentoEditor'
 import Fornecedores  from '@pages/Fornecedores'
 import Lancamentos   from '@pages/Lancamentos'
 import NotasFiscais  from '@pages/NotasFiscais'
@@ -15,6 +17,10 @@ import ContasAPagar  from '@pages/ContasAPagar'
 import ContasAReceber from '@pages/ContasAReceber'
 import AutorizacaoPagamento from '@pages/AutorizacaoPagamento'
 import Almoxarifado from '@pages/Almoxarifado'
+import EstruturaObra from '@pages/EstruturaObra'
+import DiarioObra from '@pages/DiarioObra'
+import PainelObra from '@pages/PainelObra'
+import FaturasADM from '@pages/FaturasADM'
 import PainelSupervisor from '@pages/PainelSupervisor'
 import PainelSupervisorInicio from '@pages/PainelSupervisorInicio'
 import SupervisorEstado from '@pages/SupervisorEstado'
@@ -23,9 +29,10 @@ import SupervisorConfiguracoes from '@pages/SupervisorConfiguracoes'
 import PainelCentral from '@pages/PainelCentral'
 import PainelMaster from '@pages/PainelMaster'
 import MasterConfiguracoesEmail from '@pages/MasterConfiguracoesEmail'
+import MasterLogExclusoes from '@pages/MasterLogExclusoes'
+import Usuarios      from '@pages/Usuarios'
 import PainelSetorPessoal from '@pages/PainelSetorPessoal'
 import SolicitacoesPessoal from '@pages/SolicitacoesPessoal'
-import Backup from '@pages/Backup'
 import MeusLotes from '@pages/MeusLotes'
 import AlmoxarifadoEntradas from '@pages/AlmoxarifadoEntradas'
 import Estoque from '@pages/Estoque'
@@ -67,7 +74,7 @@ export default function AppRoutes() {
               mesma página que o Supervisor já usava (Segurança +
               Carimbo de Assinatura) */}
           <Route path="/configuracoes" element={
-            <PermissaoGuard perfis={['admin', 'gestor']}><SupervisorConfiguracoes /></PermissaoGuard>
+            <PermissaoGuard perfis={['admin', 'gestor', 'master']}><SupervisorConfiguracoes /></PermissaoGuard>
           } />
 
           {/* Recursos Humanos — só ADM */}
@@ -76,6 +83,15 @@ export default function AppRoutes() {
           } />
           <Route path="/relatorios-rh" element={
             <PermissaoGuard perfis={['admin']} chave="relatorios-rh"><RelatoriosRH /></PermissaoGuard>
+          } />
+          <Route path="/folha-pagamento" element={
+            <PermissaoGuard perfis={['admin']} chave="folha-pagamento"><FolhaPagamento /></PermissaoGuard>
+          } />
+          <Route path="/folha-pagamento/nova" element={
+            <PermissaoGuard perfis={['admin']} chave="folha-pagamento"><FolhaPagamentoEditor /></PermissaoGuard>
+          } />
+          <Route path="/folha-pagamento/:id" element={
+            <PermissaoGuard perfis={['admin']} chave="folha-pagamento"><FolhaPagamentoEditor /></PermissaoGuard>
           } />
 
           {/* Financeiro — a maior parte só ADM; AP e Notas Fiscais
@@ -95,6 +111,12 @@ export default function AppRoutes() {
           } />
           <Route path="/contas-a-receber" element={
             <PermissaoGuard perfis={['admin']} chave="contas-a-receber"><ContasAReceber /></PermissaoGuard>
+          } />
+
+          {/* Faturas — mensalidade de uso do sistema, só ADM
+              ("Visível apenas no painel do ADM", pedido explícito) */}
+          <Route path="/faturas" element={
+            <PermissaoGuard perfis={['admin']} chave="faturas"><FaturasADM /></PermissaoGuard>
           } />
           <Route path="/autorizacao-pagamento" element={
             <PermissaoGuard perfis={['admin', 'gestor']} chave="autorizacao-pagamento"><AutorizacaoPagamento /></PermissaoGuard>
@@ -145,6 +167,12 @@ export default function AppRoutes() {
           <Route path="/master/email" element={
             <PermissaoGuard perfis={['master']}><MasterConfiguracoesEmail /></PermissaoGuard>
           } />
+          <Route path="/master/exclusoes" element={
+            <PermissaoGuard perfis={['master']}><MasterLogExclusoes /></PermissaoGuard>
+          } />
+          <Route path="/master/usuarios" element={
+            <PermissaoGuard perfis={['master']}><Usuarios /></PermissaoGuard>
+          } />
 
           {/* Setor Pessoal — recebe admissões/desligamentos/alterações
               salariais e outras movimentações de todas as obras */}
@@ -155,11 +183,6 @@ export default function AppRoutes() {
           {/* ADM — acompanha o que enviou pro Setor Pessoal e baixa as respostas */}
           <Route path="/solicitacoes-pessoal" element={
             <PermissaoGuard perfis={['admin']} chave="solicitacoes-pessoal"><SolicitacoesPessoal /></PermissaoGuard>
-          } />
-
-          {/* Backup do sistema — exportar/importar todo o banco */}
-          <Route path="/backup" element={
-            <PermissaoGuard perfis={['admin', 'master']} chave="backup"><Backup /></PermissaoGuard>
           } />
 
           {/* ADM — lotes já enviados pro Supervisor, só visualização */}
@@ -178,6 +201,27 @@ export default function AppRoutes() {
           } />
           <Route path="/almoxarifado/estoque" element={
             <PermissaoGuard perfis={['admin', 'almoxarife', 'gestor']} chave="almoxarifado-estoque"><Estoque /></PermissaoGuard>
+          } />
+
+          {/* Obra — Estrutura Analítica (EAP), só ADM por enquanto
+              (é quem monta a estrutura da obra) */}
+          {/* Obra — Estrutura Analítica (EAP), agora com o Gestor
+              (era do ADM) — junto com o Diário de Obra, fica tudo na
+              mão de quem acompanha a obra de perto no dia a dia. */}
+          <Route path="/obra/estrutura" element={
+            <PermissaoGuard perfis={['gestor']} chave="obra-estrutura"><EstruturaObra /></PermissaoGuard>
+          } />
+
+          {/* Diário de Obra — só Gestor por enquanto (decisão
+              explícita do usuário; ADM cadastra a EAP mas não lança
+              o diário — pode mudar quando existir um perfil dedicado
+              tipo "Encarregado") */}
+          <Route path="/obra/diario" element={
+            <PermissaoGuard perfis={['gestor']} chave="obra-diario"><DiarioObra /></PermissaoGuard>
+          } />
+
+          <Route path="/obra/painel" element={
+            <PermissaoGuard perfis={['admin', 'gestor']} chave="obra-painel"><PainelObra /></PermissaoGuard>
           } />
 
           {/* REMOVIDO: /usuarios e /configuracoes ficaram redundantes

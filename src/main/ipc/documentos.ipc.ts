@@ -2,8 +2,9 @@ import { ipcMain, BrowserWindow, app, dialog, shell } from 'electron'
 import { writeFile, unlink, readFile, mkdir, copyFile } from 'fs/promises'
 import { join, extname }                        from 'path'
 import { randomUUID }                           from 'crypto'
-import { PDFDocument, StandardFonts, rgb }      from 'pdf-lib'
-import { baixarDocumento, isStorageUri }        from '../supabase/storage'
+import { PDFDocument, PDFPage, StandardFonts, rgb }      from 'pdf-lib'
+import { baixarDocumento, isStorageUri, uploadDocumento, storagePath } from '../supabase/storage'
+import { getDatabaseProvider }                  from '../supabase/client'
 
 interface ImprimirParams {
   html:         string
@@ -15,7 +16,21 @@ interface ComAnexosParams {
   html:         string
   landscape?:   boolean
   nomeArquivo:  string
-  anexos:       string[]  // caminhos completos dos arquivos (PDF ou imagem)
+  anexos:       AnexoParaMesclar[]
+  // ALTERADO: era um carimbo só (o de quem tinha acabado de clicar em
+  // "Autorizar") — agora é uma LISTA, porque uma AP pode já ter tanto
+  // a aprovação do Gestor quanto a do Supervisor no momento de
+  // REGENERAR o PDF (ex: reimprimir depois dos dois já terem
+  // aprovado). Cada item já traz sua própria posição.
+  carimbos?: {
+    aprovadoPor: string; aprovadoEm: string; carimboBase64?: string | null
+    posicao: 'inferior-esquerdo' | 'inferior-direito'
+  }[]
+}
+
+interface AnexoParaMesclar {
+  caminho:        string  // caminho completo do arquivo (PDF ou imagem)
+  vaiAssinatura?: boolean
 }
 
 // ALTERADO: em vez de ir direto pro diálogo de impressão do Windows
@@ -28,6 +43,36 @@ interface ComAnexosParams {
 // voltar a ir direto pra impressora.
 function sanitizarNomeArquivo(nome: string): string {
   return nome.replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 120) || 'documento'
+}
+
+// NOVO: causa raiz do carimbo sumindo de forma intermitente (Gestor
+// aprova, às vezes sai sem carimbo nenhum — nem pra ele mesmo, sem
+// erro nenhum, mais comum processando várias APs em sequência
+// rápida). `win.loadFile()` resolve quando a página TERMINA DE
+// CARREGAR, mas isso não garante que uma imagem embutida como base64
+// (o carimbo) já tenha terminado de DECODIFICAR/DESENHAR — são duas
+// etapas distintas do Chromium. `printToPDF()` captura o que está
+// desenhado NAQUELE INSTANTE; se disparar cedo demais (mais provável
+// com a máquina ocupada, processando várias APs seguidas), a imagem
+// ainda não apareceu e o PDF sai sem ela — sem nenhum erro, porque
+// tecnicamente nada falhou. `img.decode()` garante que a decodificação
+// terminou de verdade antes de seguir.
+async function aguardarImagens(win: BrowserWindow): Promise<void> {
+  await win.webContents.executeJavaScript(`
+    (async () => {
+      await Promise.all(Array.from(document.images).map(img =>
+        img.decode ? img.decode().catch(() => {}) : Promise.resolve()
+      ))
+      // REFORÇADO: decodificar a imagem garante que os BYTES estão
+      // prontos, mas não garante que o Chromium já PINTOU ela na tela
+      // — são duas etapas distintas do motor de renderização. Esperar
+      // dois requestAnimationFrame seguidos é a forma padrão de
+      // garantir que pelo menos um quadro já foi desenhado de verdade
+      // antes de continuar (o primeiro só agenda o próximo desenho; o
+      // segundo confirma que o desenho anterior já aconteceu).
+      await new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)))
+    })()
+  `)
 }
 
 // Gera o PDF do documento (AP etc.) e junta na sequência os arquivos
@@ -46,9 +91,20 @@ function sanitizarNomeArquivo(nome: string): string {
 // já aberto, na ordem em que aparecem — usada tanto por
 // gerarBytesComAnexos (documento + anexos) quanto por
 // gerarBytesSoAnexos (só os anexos, sem nenhum documento base).
-async function juntarArquivosEmPdf(documentoFinal: PDFDocument, arquivos: string[]): Promise<void> {
-  for (const caminho of arquivos) {
+async function juntarArquivosEmPdf(
+  documentoFinal: PDFDocument,
+  arquivos: AnexoParaMesclar[],
+  carimbos?: ComAnexosParams['carimbos']
+): Promise<void> {
+  for (const item of arquivos) {
+    // CORRIGIDO: um anexo já enviado antes pro Storage vem como
+    // "supabase://..." (não é mais um caminho local) — sem baixar
+    // primeiro, o Node tentava ler isso como se fosse um caminho de
+    // arquivo relativo, e acabava juntando com a pasta do programa
+    // instalado (erro ENOENT com um caminho sem nexo nenhum).
+    const caminho = isStorageUri(item.caminho) ? await baixarDocumento(item.caminho) : item.caminho
     const ext = extname(caminho).toLowerCase()
+    const paginaAntesDoAnexo = documentoFinal.getPageCount()
 
     if (ext === '.pdf') {
       const bytes = await readFile(caminho)
@@ -65,10 +121,22 @@ async function juntarArquivosEmPdf(documentoFinal: PDFDocument, arquivos: string
     }
     // outros formatos são ignorados silenciosamente — o campo de
     // anexo do formulário já restringe a PDF/imagem
+
+    // ALTERADO: anexo marcado "Vai Assinatura" — carimba a PRIMEIRA
+    // página desse anexo específico com TODOS os carimbos já
+    // aplicados na AP até agora (Gestor e/ou Supervisor), não só o
+    // de quem clicou por último.
+    if (item.vaiAssinatura && carimbos?.length && documentoFinal.getPageCount() > paginaAntesDoAnexo) {
+      const primeiraPaginaDoAnexo = documentoFinal.getPage(paginaAntesDoAnexo)
+      for (const carimbo of carimbos) {
+        await desenharCarimboNaPagina(primeiraPaginaDoAnexo, documentoFinal, { ...carimbo, tamanho: 'pequeno' })
+      }
+    }
   }
 }
 
 async function gerarBytesComAnexos(win: BrowserWindow, p: ComAnexosParams): Promise<Uint8Array> {
+  await aguardarImagens(win)
   const bufferDocumento = await win.webContents.printToPDF({
     printBackground: true,
     landscape:       p.landscape ?? false,
@@ -82,7 +150,7 @@ async function gerarBytesComAnexos(win: BrowserWindow, p: ComAnexosParams): Prom
   paginasDoc.forEach(pg => documentoFinal.addPage(pg))
 
   // Depois, cada anexo, na ordem em que foram adicionados.
-  await juntarArquivosEmPdf(documentoFinal, p.anexos)
+  await juntarArquivosEmPdf(documentoFinal, p.anexos, p.carimbos)
 
   return documentoFinal.save()
 }
@@ -92,38 +160,43 @@ async function gerarBytesComAnexos(win: BrowserWindow, p: ComAnexosParams): Prom
 // escaneada) — só precisa juntar os arquivos anexados num PDF só.
 async function gerarBytesSoAnexos(arquivos: string[]): Promise<Uint8Array> {
   const documentoFinal = await PDFDocument.create()
-  await juntarArquivosEmPdf(documentoFinal, arquivos)
+  // NF não usa "vai assinatura" (o carimbo dela é aplicado depois,
+  // por cima do PDF pronto, via carimbarPrimeiraPagina) — só precisa
+  // do formato novo de item pra chamar juntarArquivosEmPdf.
+  await juntarArquivosEmPdf(documentoFinal, arquivos.map(caminho => ({ caminho })))
   return documentoFinal.save()
 }
 
 // ALTERADO: agora o carimbo pode ser a IMAGEM que o próprio usuário
-// subiu em Configurações — só a data/hora aparece embaixo dela, sem
-// o texto "Aprovado por X em Y". Se o usuário ainda não subiu nenhum
-// carimbo (ou a imagem falha ao carregar por algum motivo), cai pro
-// carimbo de texto de sempre, pra nunca ficar sem nenhuma assinatura
-// no documento.
+// subiu em Configurações, sobreposta no canto da página. Se o usuário
+// ainda não subiu nenhum carimbo (ou a imagem falha ao carregar por
+// algum motivo), cai pro carimbo de texto de sempre, pra nunca ficar
+// sem nenhuma assinatura no documento.
 //
-// ALTERADO: o carimbo de imagem do Gestor/ADM na AP (posicao
-// 'dados-bancarios-ap') deixou de ficar solto no canto inferior da
-// página e passou pra dentro da caixa de "DADOS BANCARIOS:" — mesmo
-// lugar onde a assinatura cai numa AP impressa e assinada à mão (usei
-// uma AP assinada de verdade, mandada pelo usuário, pra calcular essa
-// posição: ~264pt da esquerda, ~260pt do topo da página A4). O
-// carimbo do Supervisor continua no canto inferior direito, sem
-// mudança de posição — só de tamanho, igual o resto.
-async function carimbarPrimeiraPagina(caminhoPdf: string, p: {
+// CORRIGIDO: o carimbo do Gestor/ADM na AP (posição junto de "DADOS
+// BANCARIOS:") deixou de vir por aqui — carimbar por cima de um PDF
+// pronto usa uma coordenada FIXA da página, e o documento muda de
+// altura conforme a quantidade de parcelas, fazendo o carimbo cair
+// fora do lugar (foi exatamente o que aconteceu — chegou a ser
+// ajustado várias vezes tentando acertar a posição fixa, até ficar
+// claro que esse caminho nunca ia ser 100% confiável). Agora esse
+// carimbo é HTML de verdade, embutido direto na célula de "Dados
+// Bancários" (ver ap.ts) — acompanha o fluxo do documento sozinho,
+// não importa o tamanho que ele fique. Aqui continua só o carimbo do
+// Supervisor (canto inferior direito), que não tem esse problema
+// porque a posição dele nunca dependeu do tamanho do corpo da AP.
+// NOVO: lógica de desenho do carimbo extraída pra função própria —
+// antes só vivia dentro de carimbarPrimeiraPagina (que sempre
+// carregava/salvava um arquivo inteiro). Agora também é usada direto
+// numa página específica de um PDF já em memória (o caso da AP: o
+// anexo marcado "vai assinatura" ganha o carimbo ANTES de entrar no
+// PDF final mesclado, sem precisar salvar/reabrir nada à parte).
+async function desenharCarimboNaPagina(pagina: PDFPage, pdfDoc: PDFDocument, p: {
   aprovadoPor: string; aprovadoEm: string; carimboBase64?: string | null
-  posicao?: 'inferior-esquerdo' | 'inferior-direito' | 'dados-bancarios-ap'
+  posicao?: 'inferior-esquerdo' | 'inferior-direito'
   tamanho?: 'normal' | 'pequeno'
 }) {
-  const bytes = await readFile(caminhoPdf)
-  const pdfDoc = await PDFDocument.load(bytes)
-  const paginas = pdfDoc.getPages()
-  if (paginas.length === 0) return
-
-  const primeira = paginas[0]
-  const { width: larguraPagina, height: alturaPagina } = primeira.getSize()
-  const fonteTexto = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  const { width: larguraPagina } = pagina.getSize()
   const dataFormatada = new Date(p.aprovadoEm).toLocaleString('pt-BR', {
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
   })
@@ -138,45 +211,10 @@ async function carimbarPrimeiraPagina(caminhoPdf: string, p: {
       const imgBytes = Buffer.from(base64Puro, 'base64')
       const imagem = await pdfDoc.embedPng(imgBytes)
 
-      // NOVO: carimbo de imagem maior que antes (estava saindo muito
-      // pequeno) — 46pt de altura, contra os 28pt/40pt de antes. O da
-      // AP (Gestor/ADM) foi ajustado de novo por cima disso — ver
-      // mais abaixo.
-      // CORRIGIDO: a data/hora embaixo da imagem foi removida — não
-      // precisa mais, só a imagem do carimbo mesmo.
-      const alturaImgBase = 46
-
-      function desenhar(alturaImg: number, x: number, yImg: number) {
-        const larguraImg = (imagem.width / imagem.height) * alturaImg
-        primeira.drawImage(imagem, { x, y: yImg, width: larguraImg, height: alturaImg })
-      }
-
-      if (p.posicao === 'dados-bancarios-ap') {
-        // Área de "DADOS BANCARIOS:" da AP — mesmo lugar de uma
-        // assinatura física. Calculado a partir de uma AP real
-        // assinada à mão (mandada pelo usuário), e depois ajustado
-        // de novo com base em como ficou impresso de verdade: mais
-        // pra esquerda (usa melhor o espaço em branco daquela
-        // coluna) e um tamanho menor que o anterior (tinha ficado
-        // grande demais e encostava no rodapé — 3x virou 2x). Carimba
-        // as DUAS vias da AP (o modelo sempre imprime 2 cópias na
-        // mesma página — ver `duasVias` em documentos/base.ts); a
-        // distância entre as vias (~388pt) foi medida gerando uma AP
-        // de teste com esse mesmo modelo.
-        const alturaImg = alturaImgBase * 2
-        const distanciaDoTopo = 280 - 28.35
-        const distanciaEntreVias = 388
-        const x = 140
-        desenhar(alturaImg, x, alturaPagina - distanciaDoTopo - alturaImg)
-        desenhar(alturaImg, x, alturaPagina - (distanciaDoTopo + distanciaEntreVias) - alturaImg)
-      } else {
-        const larguraImg = (imagem.width / imagem.height) * alturaImgBase
-        const x = p.posicao === 'inferior-direito' ? larguraPagina - margem - larguraImg : margem
-        const yImg = margem
-        desenhar(alturaImgBase, x, yImg)
-      }
-
-      await writeFile(caminhoPdf, await pdfDoc.save())
+      const alturaImg = 80
+      const larguraImg = (imagem.width / imagem.height) * alturaImg
+      const x = p.posicao === 'inferior-direito' ? larguraPagina - margem - larguraImg : margem
+      pagina.drawImage(imagem, { x, y: margem, width: larguraImg, height: alturaImg })
       return
     } catch (erro) {
       console.error('Erro ao desenhar o carimbo de imagem — usando o carimbo de texto como reserva:', erro)
@@ -185,9 +223,8 @@ async function carimbarPrimeiraPagina(caminhoPdf: string, p: {
   }
 
   // ── Carimbo de texto — reserva pra quem ainda não subiu uma
-  // imagem de carimbo (ou se a imagem falhar por algum motivo). O
-  // símbolo de "certo" é desenhado como duas linhas (a fonte padrão
-  // do PDF não sabe desenhar o caractere ✓).
+  // imagem de carimbo (ou se a imagem falhar por algum motivo).
+  const fonteTexto = await pdfDoc.embedFont(StandardFonts.Helvetica)
   const corBorda = rgb(0.184, 0.498, 0.961) // #2f7ff5, mesma da AP
   const texto = `Aprovado por ${p.aprovadoPor} em ${dataFormatada}`
   const tamanhoFonte = pequeno ? 7 : 9
@@ -200,7 +237,7 @@ async function carimbarPrimeiraPagina(caminhoPdf: string, p: {
 
   const x = p.posicao === 'inferior-direito' ? larguraPagina - margem - largura : margem
 
-  primeira.drawRectangle({
+  pagina.drawRectangle({
     x, y: margem, width: largura, height: altura,
     color: rgb(1, 1, 1), opacity: 0.78,
     borderColor: corBorda, borderWidth: 1, borderOpacity: 0.9,
@@ -209,16 +246,41 @@ async function carimbarPrimeiraPagina(caminhoPdf: string, p: {
   const cx = x + paddingH + (pequeno ? 2 : 3)
   const cy = margem + altura / 2
   const tamanhoCheck = pequeno ? 0.75 : 1
-  primeira.drawLine({ start: { x: cx, y: cy }, end: { x: cx + 3 * tamanhoCheck, y: cy - 3.5 * tamanhoCheck }, thickness: 1.2, color: corTexto, opacity: 0.95 })
-  primeira.drawLine({ start: { x: cx + 3 * tamanhoCheck, y: cy - 3.5 * tamanhoCheck }, end: { x: cx + 9 * tamanhoCheck, y: cy + 5 * tamanhoCheck }, thickness: 1.2, color: corTexto, opacity: 0.95 })
+  pagina.drawLine({ start: { x: cx, y: cy }, end: { x: cx + 3 * tamanhoCheck, y: cy - 3.5 * tamanhoCheck }, thickness: 1.2, color: corTexto, opacity: 0.95 })
+  pagina.drawLine({ start: { x: cx + 3 * tamanhoCheck, y: cy - 3.5 * tamanhoCheck }, end: { x: cx + 9 * tamanhoCheck, y: cy + 5 * tamanhoCheck }, thickness: 1.2, color: corTexto, opacity: 0.95 })
 
-  primeira.drawText(texto, {
+  pagina.drawText(texto, {
     x: x + paddingH + espacoCheck, y: margem + altura / 2 - tamanhoFonte / 2 + 1,
     size: tamanhoFonte, font: fonteTexto, color: corTexto, opacity: 0.95,
   })
+}
 
-  const bytesFinais = await pdfDoc.save()
-  await writeFile(caminhoPdf, bytesFinais)
+async function carimbarPrimeiraPagina(caminhoPdf: string, p: {
+  aprovadoPor: string; aprovadoEm: string; carimboBase64?: string | null
+  posicao?: 'inferior-esquerdo' | 'inferior-direito'
+  tamanho?: 'normal' | 'pequeno'
+}) {
+  // CORRIGIDO: quando o PDF já mora no Storage (supabase://...), essa
+  // função tentava ler/escrever esse "caminho" como se fosse um
+  // arquivo local de verdade — sempre falhava. Agora baixa antes de
+  // mexer, e sobe de volta pro MESMO endereço depois de carimbar, sem
+  // trocar o que fica salvo no banco.
+  const eraNuvem = isStorageUri(caminhoPdf)
+  const caminhoRemoto = eraNuvem ? storagePath(caminhoPdf) : null
+  const caminhoLocal = eraNuvem ? await baixarDocumento(caminhoPdf) : caminhoPdf
+
+  async function salvarDeVolta(bytesFinais: Uint8Array) {
+    await writeFile(caminhoLocal, bytesFinais)
+    if (eraNuvem && caminhoRemoto) await uploadDocumento(caminhoLocal, caminhoRemoto)
+  }
+
+  const bytes = await readFile(caminhoLocal)
+  const pdfDoc = await PDFDocument.load(bytes)
+  const paginas = pdfDoc.getPages()
+  if (paginas.length === 0) return
+
+  await desenharCarimboNaPagina(paginas[0], pdfDoc, p)
+  await salvarDeVolta(await pdfDoc.save())
 }
 
 export function registerDocumentosIpc() {
@@ -250,9 +312,19 @@ export function registerDocumentosIpc() {
       await writeFile(tempHtmlPath, p.html, 'utf-8')
       await win.loadFile(tempHtmlPath)
 
+      // CORRIGIDO: sem "margins: marginType none", o Electron ignora
+      // a margem que cada documento define no próprio CSS (@page
+      // margin, em documentoBase) e usa sempre a margem padrão do
+      // Chromium (~10mm) por baixo dos panos — foi por isso que
+      // "margem zerada" na Ficha de EPI nunca fazia efeito de
+      // verdade, e o conteúdo (que já contava com mais espaço
+      // disponível) acabava estourando pra uma 3ª página. Agora quem
+      // manda na margem é mesmo o CSS de cada documento.
+      await aguardarImagens(win)
       const bytes = await win.webContents.printToPDF({
         printBackground: true,
         landscape:       p.landscape ?? false,
+        margins:         { marginType: 'none' },
       })
       await writeFile(tempPdfPath, bytes)
 
@@ -335,7 +407,15 @@ export function registerDocumentosIpc() {
   // tela usa depois pra "reimprimir", evitando o problema de reabrir
   // um PDF dentro do próprio Electron pra imprimir (dava página em
   // branco).
-  ipcMain.handle('documentos:salvarPdfInterno', async (_e, p: ComAnexosParams & { pastaId: string }) => {
+  // CORRIGIDO: o PDF só ficava salvo no disco do computador que gerou
+  // — o caminho ia pro banco (compartilhado), mas o ARQUIVO em si
+  // nunca saía da máquina, então abrir de outro computador sempre
+  // falhava ("arquivo não encontrado"). Agora, em modo Supabase, o
+  // PDF sobe pro Storage depois de gerado, e o que fica salvo no
+  // banco é o endereço na nuvem (supabase://...) — documentos:abrirArquivo
+  // já sabia baixar esse formato antes de abrir, só faltava alguém
+  // realmente subir o arquivo pra lá.
+  ipcMain.handle('documentos:salvarPdfInterno', async (_e, p: ComAnexosParams & { pastaId: string; empresa_id?: number }) => {
     const nomeBase = sanitizarNomeArquivo(p.nomeArquivo)
     const win = new BrowserWindow({ show: false })
     const tempPath = join(app.getPath('temp'), `${nomeBase}-${randomUUID().slice(0, 8)}.html`)
@@ -353,6 +433,14 @@ export function registerDocumentosIpc() {
       const caminhoFinal = join(pastaDestino, nomeArquivo)
 
       await writeFile(caminhoFinal, bytesFinal)
+
+      if (getDatabaseProvider() === 'supabase') {
+        if (!p.empresa_id) throw new Error('empresa_id é obrigatório pra salvar o documento na nuvem.')
+        const remoto = `${p.empresa_id}/documentos-gerados/${sanitizarNomeArquivo(p.pastaId)}/${nomeArquivo}`
+        const caminhoNuvem = await uploadDocumento(caminhoFinal, remoto)
+        return { ok: true, filePath: caminhoNuvem }
+      }
+
       return { ok: true, filePath: caminhoFinal }
     } finally {
       win.destroy()
@@ -365,25 +453,35 @@ export function registerDocumentosIpc() {
   // anexos de cada categoria (nota e boleto) em DOIS PDFs distintos,
   // salvos numa pasta própria do programa, prontos pro Gestor
   // visualizar e aprovar (mesmo fluxo da AP).
+  // CORRIGIDO: mesmo problema do salvarPdfInterno — sem subir pro
+  // Storage, o arquivo só existia no computador que gerou.
   ipcMain.handle('documentos:gerarPdfsSeparados', async (_e, p: {
-    notaArquivos: string[]; boletoArquivos: string[]; pastaId: string
+    notaArquivos: string[]; boletoArquivos: string[]; pastaId: string; empresa_id?: number
   }) => {
     const pastaDestino = join(app.getPath('userData'), 'notas_fiscais')
     await mkdir(pastaDestino, { recursive: true })
     const idBase = sanitizarNomeArquivo(p.pastaId)
+    const nuvem = getDatabaseProvider() === 'supabase'
+    if (nuvem && !p.empresa_id) throw new Error('empresa_id é obrigatório pra salvar o documento na nuvem.')
 
     let notaPdfPath: string | null = null
     let boletosPdfPath: string | null = null
 
     if (p.notaArquivos.length > 0) {
       const bytes = await gerarBytesSoAnexos(p.notaArquivos)
-      notaPdfPath = join(pastaDestino, `${idBase}_nota.pdf`)
-      await writeFile(notaPdfPath, bytes)
+      const local = join(pastaDestino, `${idBase}_nota.pdf`)
+      await writeFile(local, bytes)
+      notaPdfPath = nuvem
+        ? await uploadDocumento(local, `${p.empresa_id}/documentos-gerados/${idBase}/${idBase}_nota.pdf`)
+        : local
     }
     if (p.boletoArquivos.length > 0) {
       const bytes = await gerarBytesSoAnexos(p.boletoArquivos)
-      boletosPdfPath = join(pastaDestino, `${idBase}_boletos.pdf`)
-      await writeFile(boletosPdfPath, bytes)
+      const local = join(pastaDestino, `${idBase}_boletos.pdf`)
+      await writeFile(local, bytes)
+      boletosPdfPath = nuvem
+        ? await uploadDocumento(local, `${p.empresa_id}/documentos-gerados/${idBase}/${idBase}_boletos.pdf`)
+        : local
     }
 
     return { ok: true, notaPdfPath, boletosPdfPath }
@@ -419,7 +517,11 @@ export function registerDocumentosIpc() {
     for (const arq of arquivos) {
       try {
         const nomeFinal = `${sanitizarNomeArquivo(arq.nomeArquivo)}.pdf`
-        await copyFile(arq.origem, join(pastaDestino, nomeFinal))
+        // CORRIGIDO: mesmo problema do juntarArquivosEmPdf — um PDF
+        // já salvo na nuvem vem como "supabase://...", precisa baixar
+        // antes de copiar, não dá pra copiar direto um endereço.
+        const origem = isStorageUri(arq.origem) ? await baixarDocumento(arq.origem) : arq.origem
+        await copyFile(origem, join(pastaDestino, nomeFinal))
         copiados++
       } catch {
         falhas.push(arq.nomeArquivo)

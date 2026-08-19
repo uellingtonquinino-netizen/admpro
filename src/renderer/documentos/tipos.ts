@@ -2,11 +2,12 @@ import { documentoBase, fmtData, hoje, cabecalhoComLogo, chk, type ColaboradorDo
 import { numeroPorExtenso } from '../utils/numeroPorExtenso'
 import { formatCPF, formatCNPJ } from '../utils/documentValidators'
 import { proximoDiaUtil } from '../utils/proximoDiaUtil'
+import { gerarHtmlProtocoloEntrega } from './protocoloEntrega'
 
 export interface CampoExtra {
   key:      string
   label:    string
-  type:     'text' | 'date' | 'number' | 'textarea' | 'select' | 'multiselect' | 'horas_extras' | 'hora'
+  type:     'text' | 'date' | 'number' | 'textarea' | 'select' | 'multiselect' | 'horas_extras' | 'hora' | 'busca_produto'
   options?: string[]
   default?: string
 }
@@ -143,6 +144,14 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
       titulo: 'Ficha de EPI',
       paisagem: true,
       corpoHtml: `
+        <style>
+          /* Bordas pretas só nessa Ficha — o resto dos documentos
+             continua com a borda cinza padrão (table.dados td, em
+             base.ts), não dá pra mudar ali sem afetar todo mundo.
+             Precisa do "table.dados" na frente pra ganhar da regra
+             padrão em especificidade (senão a #999 original vencia). */
+          table.dados.epi-cabecalho td, table.dados.epi-itens td { border-color: #000; }
+        </style>
         <div class="form-outer" style="font-size:10.5px;page-break-after:always;">
           ${cabecalhoComLogo('Ficha de Controle e Entrega de Equipamento de Proteção Individual', empresa.logo_url)}
           <table class="dados epi-cabecalho">
@@ -774,6 +783,7 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
         ${cabecalhoComLogo('Comunicado de Dispensa de Funcionário ao Setor Pessoal', empresa.logo_url)}
         <table class="dados cols-ajustadas">
           <tr><td class="label">Obra</td><td colspan="3">${empresa.nome}</td></tr>
+          <tr><td class="label">Código</td><td colspan="3">${c.matricula_esocial || '—'}</td></tr>
           <tr><td class="label">Nome</td><td colspan="3">${c.nome}</td></tr>
           <tr><td class="label">Função</td><td colspan="3">${c.funcao ?? '—'}</td></tr>
           <tr>
@@ -1037,6 +1047,24 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
       `,
       })
     },
+  },
+
+  // ── Protocolo de Entrega (itens de uso pessoal, a devolver) ──
+  {
+    id: 'protocolo_entrega',
+    label: 'Protocolo de Entrega',
+    campos: [
+      { key: 'quantidade', label: 'Quantidade', type: 'text' },
+      { key: 'item', label: 'Item', type: 'busca_produto' },
+      { key: 'valor_unitario', label: 'Valor unitário (R$)', type: 'number' },
+      { key: 'local', label: 'Local (cidade - UF)', type: 'text' },
+    ],
+    gerarHtml: (c, empresa, ex) => gerarHtmlProtocoloEntrega(c, empresa, {
+      quantidade:    ex.quantidade ?? '',
+      item:          ex.item ?? '',
+      valorUnitario: Number(String(ex.valor_unitario || '0').replace(',', '.')) || 0,
+      local:         ex.local,
+    }),
   },
 
 ]

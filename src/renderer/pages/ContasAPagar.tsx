@@ -147,7 +147,7 @@ export default function ContasAPagar() {
           description="Ajuste os filtros acima, ou emita uma AP / lance uma Nota Fiscal para ver as despesas aqui."
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">

@@ -91,7 +91,32 @@ export function registerMasterIpc() {
   // ── Visão geral de UMA obra: RH, Financeiro, quem ocupa cada
   // função, e a lista de usuários pra gerenciar ──────────────
   ipcMain.handle('master:obraDetalhe', async (_e, empresa_id: number) => {
-    if(getDatabaseProvider()==='supabase') { const s=getSupabase();const [{data:empresa,error:e1},{data:colaboradores,error:e2},{data:lancamentos,error:e3},{data:usuarios,error:e4},{data:links,error:e5}]=await Promise.all([s.from('empresas').select('*').eq('id',empresa_id).maybeSingle(),s.from('colaboradores').select('status,salario_base').eq('empresa_id',empresa_id),s.from('lancamentos').select('valor,data,status,tipo').eq('empresa_id',empresa_id),s.from('usuarios').select('id,nome,email,perfil,ativo,last_login_at').eq('empresa_id',empresa_id).in('perfil',['admin','gestor','almoxarife']).order('perfil').order('nome'),s.from('supervisor_obras').select('usuario_id').eq('empresa_id',empresa_id)]);for(const e of [e1,e2,e3,e4,e5])if(e)throw new Error(e.message);if(!empresa)return null;const ativos=(colaboradores??[]).filter(c=>c.status==='ativo');const inicio=new Date();inicio.setDate(1);const inicioMes=inicio.toISOString().slice(0,10);const gastos_mes=(lancamentos??[]).filter(l=>l.tipo==='despesa'&&l.status!=='cancelado'&&l.data>=inicioMes).reduce((x,l)=>x+Number(l.valor),0);const ids=(links??[]).map(l=>l.usuario_id);let supervisores:unknown[]=[];if(ids.length){const {data,error}=await s.from('usuarios').select('id,nome').in('id',ids);if(error)throw new Error(error.message);supervisores=data??[]}return {empresa,colaboradores:ativos.length,custo_folha:ativos.reduce((x,c)=>x+Number(c.salario_base),0),gastos_mes,usuarios:(usuarios??[]).map(u=>({...u,ativo:!!u.ativo})),supervisores} }
+    if(getDatabaseProvider()==='supabase') {
+      const s=getSupabase()
+      const [{data:empresa,error:e1},{data:colaboradores,error:e2},{data:lancamentos,error:e3},{data:usuariosCasa,error:e4},{data:vinculosExtras,error:e4b},{data:links,error:e5}]=await Promise.all([
+        s.from('empresas').select('*').eq('id',empresa_id).maybeSingle(),
+        s.from('colaboradores').select('status,salario_base').eq('empresa_id',empresa_id),
+        s.from('lancamentos').select('valor,data,status,tipo').eq('empresa_id',empresa_id),
+        s.from('usuarios').select('id,nome,email,perfil,ativo,last_login_at').eq('empresa_id',empresa_id).in('perfil',['admin','gestor','almoxarife']).order('perfil').order('nome'),
+        s.from('usuario_obras').select('usuario_id').eq('empresa_id',empresa_id),
+        s.from('supervisor_obras').select('usuario_id').eq('empresa_id',empresa_id),
+      ])
+      for(const e of [e1,e2,e3,e4,e4b,e5])if(e)throw new Error(e.message)
+      if(!empresa)return null
+      // CORRIGIDO: só buscava quem tem essa obra como "casa" — quem
+      // foi vinculado depois como obra EXTRA (usuario_obras) nunca
+      // aparecia aqui, mesmo action tendo acesso de verdade.
+      const idsUsuariosExtras=(vinculosExtras??[]).map(v=>v.usuario_id).filter(id=>!(usuariosCasa??[]).some(u=>u.id===id))
+      let usuariosExtras:typeof usuariosCasa=[]
+      if(idsUsuariosExtras.length){
+        const {data,error}=await s.from('usuarios').select('id,nome,email,perfil,ativo,last_login_at').in('id',idsUsuariosExtras).in('perfil',['admin','gestor','almoxarife'])
+        if(error)throw new Error(error.message)
+        usuariosExtras=data
+      }
+      const usuarios=[...(usuariosCasa??[]),...usuariosExtras].sort((a,b)=>a.perfil.localeCompare(b.perfil)||a.nome.localeCompare(b.nome,'pt-BR'))
+      const ativos=(colaboradores??[]).filter(c=>c.status==='ativo');const inicio=new Date();inicio.setDate(1);const inicioMes=inicio.toISOString().slice(0,10);const gastos_mes=(lancamentos??[]).filter(l=>l.tipo==='despesa'&&l.status!=='cancelado'&&l.data>=inicioMes).reduce((x,l)=>x+Number(l.valor),0);const ids=(links??[]).map(l=>l.usuario_id);let supervisores:unknown[]=[];if(ids.length){const {data,error}=await s.from('usuarios').select('id,nome').in('id',ids);if(error)throw new Error(error.message);supervisores=data??[]}
+      return {empresa,colaboradores:ativos.length,custo_folha:ativos.reduce((x,c)=>x+Number(c.salario_base),0),gastos_mes,usuarios:usuarios.map(u=>({...u,ativo:!!u.ativo})),supervisores}
+    }
     const empresa = db.prepare(`SELECT * FROM empresas WHERE id = ?`).get(empresa_id)
     if (!empresa) return null
 
@@ -110,11 +135,15 @@ export function registerMasterIpc() {
       WHERE empresa_id = ? AND tipo = 'despesa' AND status != 'cancelado' AND date(data) >= date(?)
     `).get(empresa_id, inicioMes.toISOString().slice(0, 10)) as { v: number }).v
 
+    // CORRIGIDO: mesma correção do lado Supabase — considera também
+    // quem foi vinculado depois como obra EXTRA (usuario_obras).
     const usuarios = db.prepare(`
-      SELECT id, nome, email, perfil, ativo, last_login_at FROM usuarios
-      WHERE empresa_id = ? AND perfil IN ('admin','gestor','almoxarife')
-      ORDER BY perfil ASC, nome COLLATE NOCASE ASC
-    `).all(empresa_id) as { id: number; nome: string; email: string; perfil: string; ativo: number; last_login_at: string | null }[]
+      SELECT DISTINCT u.id, u.nome, u.email, u.perfil, u.ativo, u.last_login_at
+      FROM usuarios u
+      LEFT JOIN usuario_obras uo ON uo.usuario_id = u.id
+      WHERE (u.empresa_id = ? OR uo.empresa_id = ?) AND u.perfil IN ('admin','gestor','almoxarife')
+      ORDER BY u.perfil ASC, u.nome COLLATE NOCASE ASC
+    `).all(empresa_id, empresa_id) as { id: number; nome: string; email: string; perfil: string; ativo: number; last_login_at: string | null }[]
 
     const supervisores = db.prepare(`
       SELECT u.id, u.nome FROM supervisor_obras so JOIN usuarios u ON u.id = so.usuario_id
@@ -129,5 +158,31 @@ export function registerMasterIpc() {
       usuarios: usuarios.map(u => ({ ...u, ativo: !!u.ativo })),
       supervisores,
     }
+  })
+
+  // ── Log de exclusões (quem apagou o quê, quando) ──────────
+  // NOVO: só funciona de verdade no Supabase (produção) — a tabela
+  // auditoria existia no banco mas nunca tinha sido usada; agora as
+  // exclusões de AP, Nota Fiscal, Colaborador, Material/Ferramenta,
+  // Fornecedor e Usuário passam a registrar aqui antes de apagar de
+  // verdade (ver registrar_exclusao no banco). No SQLite (só
+  // desenvolvimento/local) essa lista sempre volta vazia — não fazia
+  // sentido duplicar o mesmo mecanismo lá.
+  ipcMain.handle('master:listarExclusoes', async () => {
+    if (getDatabaseProvider() === 'supabase') {
+      const s = getSupabase()
+      const { data, error } = await s
+        .from('auditoria')
+        .select('id,tabela,descricao,usuario_nome,empresa_id,created_at,empresas(nome)')
+        .eq('acao', 'delete')
+        .order('created_at', { ascending: false })
+        .limit(500)
+      if (error) throw new Error(error.message)
+      return (data ?? []).map(row => {
+        const { empresas, ...resto } = row as typeof row & { empresas: { nome: string } | null }
+        return { ...resto, empresa_nome: empresas?.nome ?? '—' }
+      })
+    }
+    return []
   })
 }

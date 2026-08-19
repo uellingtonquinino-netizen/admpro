@@ -14,21 +14,26 @@ import { formatDate }        from '@utils/format'
 import { gerarHtmlSaidaAlmoxarifado } from '../documentos/saidaAlmoxarifado'
 import { Search, Plus, Trash2, Printer, PackageMinus as IconVazio } from 'lucide-react'
 
+interface ItemSaida {
+  produto_id:     number
+  produto_codigo: string
+  produto_nome:   string
+  quantidade:     number
+}
+
 interface Saida {
   id:                number
   data:              string
-  produto_id:        number
-  produto_nome:      string
-  produto_codigo:    string
-  quantidade:        number
+  itens:             ItemSaida[]
   retirado_por_nome: string
   setor:             string | null
   solicitado_por_nome: string | null
   liberado_por:      string | null
 }
 
-// NOVO: lista as saídas/retiradas do Almoxarifado — nome do produto,
-// quantidade e quem retirou aparecem logo na frente, como pedido.
+// ALTERADO: cada saída agora pode ter vários materiais/ferramentas
+// (antes era só um por linha) — a coluna de material mostra um
+// resumo de todos os itens da saída.
 export default function Saidas() {
   const empresaId = useEmpresaStore(s => s.empresaId)
   const { confirm, dialogProps } = useConfirm()
@@ -58,30 +63,35 @@ export default function Saidas() {
 
   useEffect(() => { carregar() }, [carregar])
 
+  function resumoItens(s: Saida): string {
+    return s.itens.map(it => `${it.produto_nome} (${it.quantidade})`).join(', ')
+  }
+
   // NOVO: reimprime o comprovante de retirada — antes só era possível
   // na hora de registrar a saída, sem opção de imprimir de novo depois.
   async function handleImprimir(s: Saida) {
     if (!empresaId) return
     setImprimindoId(s.id)
     try {
-      const [produto, empresa] = await Promise.all([
-        window.api.produtos.buscarPorId(s.produto_id),
-        window.api.empresas.buscarPorId(empresaId),
-      ])
+      const empresa = await window.api.empresas.buscarPorId(empresaId)
+      const produtos = await Promise.all(s.itens.map(it => window.api.produtos.buscarPorId(it.produto_id)))
       const html = gerarHtmlSaidaAlmoxarifado({
         logoUrl:           empresa.logo_url,
         empresaNome:       empresa.nome,
         data:              s.data,
-        produtoCodigo:     s.produto_codigo,
-        produtoNome:       s.produto_nome,
-        quantidade:        s.quantidade,
-        unidade:           produto?.unidade ?? null,
+        itens: s.itens.map((it, i) => ({
+          produtoCodigo: it.produto_codigo,
+          produtoNome:   it.produto_nome,
+          quantidade:    it.quantidade,
+          unidade:       produtos[i]?.unidade ?? null,
+        })),
         retiradoPorNome:   s.retirado_por_nome,
         setor:             s.setor,
         solicitadoPorNome: s.solicitado_por_nome,
         liberadoPor:       s.liberado_por,
       })
-      const result = await window.api.documentos.imprimir({ html, nomeArquivo: `Retirada - ${s.produto_nome}` })
+      const nomeArquivo = s.itens.length === 1 ? `Retirada - ${s.itens[0].produto_nome}` : `Retirada - ${s.itens.length} itens`
+      const result = await window.api.documentos.imprimir({ html, nomeArquivo })
       if (!result.ok) toast.error('Erro ao abrir a impressão.')
     } catch {
       toast.error('Erro ao preparar a impressão.')
@@ -93,7 +103,7 @@ export default function Saidas() {
   async function handleExcluir(s: Saida) {
     const ok = await confirm({
       title:   'Excluir saída',
-      message: `Deseja excluir a retirada de "${s.produto_nome}" (${s.quantidade})? A quantidade volta ao estoque.`,
+      message: `Deseja excluir a retirada de ${resumoItens(s)}? A(s) quantidade(s) volta(m) ao estoque.`,
       danger:  true,
     })
     if (!ok) return
@@ -147,11 +157,11 @@ export default function Saidas() {
           description={busca || dataInicio ? 'Ajuste os filtros acima.' : 'Clique em "Nova Saída" para registrar a primeira retirada.'}
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">
-                {['Material/Ferramenta', 'Quantidade', 'Retirado por', 'Setor', 'Solicitado por', 'Data', ''].map(h => (
+                {['Materiais/Ferramentas', 'Retirado por', 'Setor', 'Solicitado por', 'Data', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -159,11 +169,10 @@ export default function Saidas() {
             <tbody>
               {saidas.map(s => (
                 <tr key={s.id} className="border-b border-surface-border/50 hover:bg-surface-hover transition-colors">
-                  <td className="px-4 py-3 text-gray-200">
-                    {s.produto_nome}
-                    <span className="text-xs text-gray-500 ml-1.5">({s.produto_codigo})</span>
+                  <td className="px-4 py-3 text-gray-200 max-w-[320px]">
+                    {resumoItens(s)}
+                    {s.itens.length > 1 && <span className="text-xs text-gray-500 ml-1.5">({s.itens.length} itens)</span>}
                   </td>
-                  <td className="px-4 py-3 text-gray-200 font-medium">{s.quantidade}</td>
                   <td className="px-4 py-3 text-gray-200">{s.retirado_por_nome}</td>
                   <td className="px-4 py-3 text-gray-400">{s.setor ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-400">{s.solicitado_por_nome ?? '—'}</td>

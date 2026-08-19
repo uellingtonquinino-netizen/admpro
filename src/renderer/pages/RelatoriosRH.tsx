@@ -309,7 +309,7 @@ export default function RelatoriosRH() {
           description="Ajuste os filtros acima ou confira se há colaboradores cadastrados que se encaixem neste relatório."
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">

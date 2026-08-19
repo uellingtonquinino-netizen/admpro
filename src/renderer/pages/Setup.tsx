@@ -44,7 +44,7 @@ export default function Setup() {
         perfil:     'admin',
       })
       await login(admin.email, admin.senha)
-      toast.success('Tudo pronto! Bem-vindo(a) ao ADM PRO.')
+      toast.success('Tudo pronto! Bem-vindo(a) ao ADM OBRA.')
       navigate('/inicio')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro ao concluir o cadastro inicial.')
@@ -57,7 +57,7 @@ export default function Setup() {
     <div className="min-h-screen flex items-center justify-center bg-surface p-6">
       <form onSubmit={handleSubmit} className="w-full max-w-lg space-y-5">
         <div className="text-center mb-2">
-          <h1 className="text-xl font-bold">Bem-vindo(a) ao ADM PRO</h1>
+          <h1 className="text-xl font-bold">Bem-vindo(a) ao ADM OBRA</h1>
           <p className="text-sm text-gray-400 mt-1">
             Vamos configurar sua empresa/obra e seu usuário administrador.
           </p>

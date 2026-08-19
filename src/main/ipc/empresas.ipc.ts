@@ -21,6 +21,9 @@ interface CriarPayload {
   logo_url?:              string | null
   solicitante_padrao?:    string | null
   autorizado_por_padrao?: string | null
+  // NOVO: código da obra no sistema externo de folha de pagamento —
+  // o ADM digita uma vez, usado na exportação da Folha de Pagamento.
+  codigo_empresa?:        string | null
 }
 
 interface AtualizarPayload extends CriarPayload {
@@ -33,6 +36,9 @@ export function registerEmpresasIpc() {
     return
   }
   const db = getDb()
+  // NOVO: coluna usada na exportação da Folha de Pagamento — garante
+  // que existe mesmo sem mexer no arquivo central de migrations.
+  try { db.exec(`ALTER TABLE empresas ADD COLUMN codigo_empresa TEXT`) } catch { /* já existe */ }
 
   ipcMain.handle('empresas:listar', () => {
     return db.prepare(`
@@ -46,9 +52,9 @@ export function registerEmpresasIpc() {
 
   ipcMain.handle('empresas:criar', (_e, p: CriarPayload) => {
     const result = db.prepare(`
-      INSERT INTO empresas (nome, titulo_obra, razao_social, cnpj, email, telefone, endereco, logo_url, ativo)
-      VALUES (@nome, @titulo_obra, @razao_social, @cnpj, @email, @telefone, @endereco, @logo_url, 1)
-    `).run({ ...p, titulo_obra: p.titulo_obra ?? null, razao_social: p.razao_social ?? null, logo_url: p.logo_url ?? null })
+      INSERT INTO empresas (nome, titulo_obra, razao_social, cnpj, email, telefone, endereco, logo_url, codigo_empresa, ativo)
+      VALUES (@nome, @titulo_obra, @razao_social, @cnpj, @email, @telefone, @endereco, @logo_url, @codigo_empresa, 1)
+    `).run({ ...p, titulo_obra: p.titulo_obra ?? null, razao_social: p.razao_social ?? null, logo_url: p.logo_url ?? null, codigo_empresa: p.codigo_empresa ?? null })
     return { id: result.lastInsertRowid }
   })
 
@@ -64,7 +70,8 @@ export function registerEmpresasIpc() {
           cidade = @cidade, estado = @estado,
           logo_url = @logo_url,
           solicitante_padrao = @solicitante_padrao,
-          autorizado_por_padrao = @autorizado_por_padrao
+          autorizado_por_padrao = @autorizado_por_padrao,
+          codigo_empresa = @codigo_empresa
       WHERE id = @id
     `).run({
       ...p,
@@ -75,6 +82,7 @@ export function registerEmpresasIpc() {
       logo_url:               p.logo_url ?? null,
       solicitante_padrao:    p.solicitante_padrao ?? null,
       autorizado_por_padrao: p.autorizado_por_padrao ?? null,
+      codigo_empresa:        p.codigo_empresa ?? null,
     })
     return { ok: true }
   })

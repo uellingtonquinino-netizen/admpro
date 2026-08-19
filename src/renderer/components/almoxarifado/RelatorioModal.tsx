@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useEmpresaStore } from '@store/empresa.store'
 import { toast }           from '@components/ui/ToastContainer'
 import Modal                from '@components/ui/Modal'
@@ -7,6 +7,7 @@ import Input                  from '@components/ui/Input'
 import Select                  from '@components/ui/Select'
 import {
   gerarRelatorioEstoque, gerarRelatorioFaixaEstoque, gerarRelatorioMovimentacao, gerarRelatorioAlugados,
+  gerarRelatorioEstoqueMinimo, gerarRelatorioEstoqueZerado, gerarRelatorioPorCategoria,
 } from '../../documentos/relatoriosAlmoxarifado'
 import { Search } from 'lucide-react'
 
@@ -16,7 +17,7 @@ interface Props {
   onClose: () => void
 }
 
-type TipoRelatorio = 'estoque' | 'faixa' | 'movimentacao' | 'alugados'
+type TipoRelatorio = 'estoque' | 'faixa' | 'movimentacao' | 'alugados' | 'estoque_minimo' | 'estoque_zerado' | 'categoria'
 
 // NOVO: gera um dos três relatórios do Almoxarifado — estoque
 // completo, produtos numa faixa de quantidade, ou a movimentação de
@@ -35,6 +36,14 @@ export default function RelatorioModal({ onClose }: Props) {
 
   const [vencimentoInicio, setVencimentoInicio] = useState('')
   const [vencimentoFim, setVencimentoFim]       = useState('')
+
+  const [categorias, setCategorias]       = useState<string[]>([])
+  const [categoriaSel, setCategoriaSel]   = useState('')
+
+  useEffect(() => {
+    if (!empresa) return
+    window.api.produtos.categorias(empresa.id).then(setCategorias).catch(() => {})
+  }, [empresa])
 
   const [gerando, setGerando] = useState(false)
 
@@ -64,6 +73,18 @@ export default function RelatorioModal({ onClose }: Props) {
         if (!produtoSel) { toast.error('Selecione o material/ferramenta.'); setGerando(false); return }
         const movimentos = await window.api.produtos.movimentacao({ produto_id: produtoSel.id })
         html = gerarRelatorioMovimentacao(empresa, produtoSel, movimentos)
+      } else if (tipo === 'estoque_minimo') {
+        const itens: { estoque_atual: number; estoque_minimo: number }[] = await window.api.produtos.listar({ empresa_id: empresa.id })
+        const abaixoOuNoLimite = itens.filter(p => p.estoque_atual > 0 && p.estoque_atual <= p.estoque_minimo)
+        html = gerarRelatorioEstoqueMinimo(empresa, abaixoOuNoLimite as any)
+      } else if (tipo === 'estoque_zerado') {
+        const itens: { estoque_atual: number }[] = await window.api.produtos.listar({ empresa_id: empresa.id })
+        const zerados = itens.filter(p => p.estoque_atual <= 0)
+        html = gerarRelatorioEstoqueZerado(empresa, zerados as any)
+      } else if (tipo === 'categoria') {
+        if (!categoriaSel) { toast.error('Selecione a categoria.'); setGerando(false); return }
+        const itens = await window.api.produtos.listar({ empresa_id: empresa.id, categoria: categoriaSel })
+        html = gerarRelatorioPorCategoria(empresa, categoriaSel, itens as any)
       } else {
         const itens = await window.api.produtos.alugados({
           empresa_id: empresa.id,
@@ -91,6 +112,9 @@ export default function RelatorioModal({ onClose }: Props) {
           onChange={e => setTipo(e.target.value as TipoRelatorio)}
           options={[
             { value: 'estoque', label: 'Estoque completo' },
+            { value: 'estoque_minimo', label: 'Estoque Mínimo' },
+            { value: 'estoque_zerado', label: 'Estoque Zerado' },
+            { value: 'categoria', label: 'Materiais por Categoria' },
             { value: 'faixa', label: 'Materiais/Ferramentas por faixa de estoque' },
             { value: 'movimentacao', label: 'Movimentação de um material/ferramenta' },
             { value: 'alugados', label: 'Alugados' },
@@ -128,6 +152,18 @@ export default function RelatorioModal({ onClose }: Props) {
               </div>
             )}
           </div>
+        )}
+
+        {tipo === 'categoria' && (
+          <Select
+            label="Categoria"
+            value={categoriaSel}
+            onChange={e => setCategoriaSel(e.target.value)}
+            options={[
+              { value: '', label: categorias.length ? 'Selecione…' : 'Nenhuma categoria cadastrada ainda' },
+              ...categorias.map(c => ({ value: c, label: c })),
+            ]}
+          />
         )}
 
         {tipo === 'alugados' && (

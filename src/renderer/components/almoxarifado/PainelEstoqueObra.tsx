@@ -121,9 +121,9 @@ export default function PainelEstoqueObra({ empresaId }: { empresaId: number }) 
       ) : produtosFiltrados.length === 0 ? (
         <p className="text-sm text-gray-500">Nenhum resultado para "{busca}".</p>
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-auto max-h-[480px]">
           <table className="w-full text-sm">
-            <thead>
+            <thead className="sticky top-0 bg-surface z-10">
               <tr className="border-b border-surface-border">
                 {['Código', 'Material/Ferramenta', 'Unidade', 'Estoque atual', 'Valor unitário'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">{h}</th>

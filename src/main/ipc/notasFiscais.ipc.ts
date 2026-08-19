@@ -3,7 +3,7 @@ import { getDb }   from '../database/connection'
 import { criarNotificacaoEvento } from './notificacoes.ipc'
 import { verificarLoteConcluido } from './lotes.ipc'
 import { getDatabaseProvider, getSupabase } from '../supabase/client'
-import { uploadDocumento } from '../supabase/storage'
+import { uploadDocumento, isStorageUri } from '../supabase/storage'
 import { basename } from 'path'
 
 interface Boleto {
@@ -205,7 +205,34 @@ export function registerNotasFiscaisIpc() {
 
   // ── Atualizar nota — recria boletos, despesas e anexos do zero ──
   ipcMain.handle('notasFiscais:atualizar', async (_e, p: NotaPayload & { id: number }) => {
-    if(getDatabaseProvider()==='supabase') { const {error}=await getSupabase().rpc('atualizar_nota_fiscal',{p});if(error)throw new Error(error.message);return {ok:true} }
+    if(getDatabaseProvider()==='supabase') {
+      const s = getSupabase()
+      const { error } = await s.rpc('atualizar_nota_fiscal', { p })
+      if (error) throw new Error(error.message)
+
+      // CORRIGIDO: editar uma Nota Fiscal nunca mexia nos anexos — só
+      // notasFiscais:criar fazia upload/gravava a tabela filha. Um
+      // anexo aqui pode ser um caminho já enviado antes
+      // (supabase://...) ou um arquivo local recém-escolhido —
+      // só o segundo precisa subir de novo.
+      const { error: erroLimpar } = await s.from('notas_fiscais_anexos').delete().eq('nota_id', p.id)
+      if (erroLimpar) throw new Error(erroLimpar.message)
+
+      const enviar = async (caminhos: string[], categoria: 'nota' | 'boleto') => {
+        for (let ordem = 0; ordem < caminhos.length; ordem++) {
+          const original = caminhos[ordem]
+          const caminho = isStorageUri(original)
+            ? original
+            : await uploadDocumento(original, `${p.empresa_id}/notas-fiscais/${p.id}/${categoria}-${Date.now()}-${basename(original).replace(/[^a-zA-Z0-9._-]/g, '_')}`)
+          const resultado = await s.from('notas_fiscais_anexos').insert({ nota_id: p.id, caminho, categoria, ordem })
+          if (resultado.error) throw new Error(resultado.error.message)
+        }
+      }
+      await enviar(p.anexos_nota ?? [], 'nota')
+      await enviar(p.anexos_boletos ?? [], 'boleto')
+
+      return { ok: true }
+    }
     if (!p.boletos || p.boletos.length === 0) {
       throw new Error('Inclua ao menos um valor e vencimento.')
     }
@@ -265,9 +292,19 @@ export function registerNotasFiscaisIpc() {
   })
 
   // ── Salvar os caminhos dos dois PDFs gerados (nota e boletos) ──
-  ipcMain.handle('notasFiscais:salvarCaminhosPdf', (_e, p: {
+  ipcMain.handle('notasFiscais:salvarCaminhosPdf', async (_e, p: {
     id: number; nota_pdf_path?: string | null; boletos_pdf_path?: string | null
   }) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const dados: Record<string, string> = {}
+      if (p.nota_pdf_path != null) dados.nota_pdf_path = p.nota_pdf_path
+      if (p.boletos_pdf_path != null) dados.boletos_pdf_path = p.boletos_pdf_path
+      if (Object.keys(dados).length) {
+        const { error } = await getSupabase().from('notas_fiscais').update(dados).eq('id', p.id)
+        if (error) throw new Error(error.message)
+      }
+      return { ok: true }
+    }
     db.prepare(`
       UPDATE notas_fiscais
       SET nota_pdf_path = COALESCE(@nota_pdf_path, nota_pdf_path),

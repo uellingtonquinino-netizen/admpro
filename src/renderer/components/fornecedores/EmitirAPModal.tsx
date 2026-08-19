@@ -28,6 +28,7 @@ interface Boleto {
 interface Anexo {
   nome:    string
   caminho: string
+  vaiAssinatura: boolean
 }
 
 const BOLETO_VAZIO: Boleto = { valor: '', vencimento: '' }
@@ -51,6 +52,8 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
   const buscaRef = useRef<HTMLDivElement>(null)
 
   const [descricao, setDescricao]     = useState('')
+  const [dataEmissao, setDataEmissao] = useState(() => new Date().toISOString().slice(0, 10))
+  const dataEmissaoFormatada = dataEmissao.split('-').reverse().join('/')
   const [boletos, setBoletos]         = useState<Boleto[]>([{ ...BOLETO_VAZIO }])
   const [dadosBancarios, setDadosBancarios] = useState('')
   const [observacoes, setObservacoes] = useState('')
@@ -198,6 +201,7 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
         observacoes,
         solicitante,
         autorizadoPor,
+        dataEmissao:      dataEmissaoFormatada,
       })
 
       const temAnexos = anexos.length > 0
@@ -225,7 +229,8 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
         observacoes,
         solicitante,
         autorizado_por:     autorizadoPor,
-        anexos:             anexos.map(a => a.caminho),
+        data_emissao:       dataEmissao,
+        anexos:             anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
       })
 
       // Se tem anexos, salva uma cópia pronta (AP + anexos já
@@ -254,17 +259,20 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
       const resultado = await window.api.documentos.salvarPdfInterno({
         html,
         nomeArquivo: `AP - ${selecionado?.nome ?? ''}`,
-        anexos:      anexos.map(a => a.caminho),
+        anexos:      anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
         pastaId:     `AP_${apId}`,
+        empresa_id:  empresa?.id,
       })
       if (resultado.ok) {
         await window.api.ap.salvarCaminhoPdf({ id: apId, pdf_path: resultado.filePath })
         return resultado.filePath
       }
       return null
-    } catch {
+    } catch (erro) {
       // Não trava o fluxo principal — a AP já foi salva, só a cópia
-      // interna pronta pra reimpressão que pode ter falhado.
+      // interna pronta pra reimpressão que pode ter falhado. Mas
+      // registra o motivo (antes desaparecia sem rastro nenhum).
+      console.error('Erro ao salvar cópia interna da AP:', erro)
       return null
     }
   }
@@ -275,6 +283,7 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
     const novos: Anexo[] = arquivos.map(f => ({
       nome:    f.name,
       caminho: (f as unknown as { path: string }).path,
+      vaiAssinatura: false,
     }))
     setAnexos(prev => [...prev, ...novos])
     e.target.value = ''
@@ -282,6 +291,14 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
 
   function removerAnexo(i: number) {
     setAnexos(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  // NOVO: marca esse anexo pra também receber o carimbo de quem
+  // aprovar a AP (canto inferior direito) — pra quando o físico
+  // sempre era assinado junto com a AP (uma Nota Fiscal ou boletim de
+  // medição, por exemplo).
+  function alternarVaiAssinatura(i: number) {
+    setAnexos(prev => prev.map((a, idx) => (idx === i ? { ...a, vaiAssinatura: !a.vaiAssinatura } : a)))
   }
 
   function moverAnexo(i: number, direcao: -1 | 1) {
@@ -330,12 +347,13 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
         observacoes,
         solicitante,
         autorizadoPor,
+        dataEmissao:      dataEmissaoFormatada,
       })
 
       const result = await window.api.documentos.gerarPdfComAnexos({
         html,
         nomeArquivo: `AP - ${selecionado.nome}`,
-        anexos:      anexos.map(a => a.caminho),
+        anexos:      anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
       })
 
       if (result.canceled) return
@@ -351,7 +369,8 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
         observacoes,
         solicitante,
         autorizado_por:     autorizadoPor,
-        anexos:             anexos.map(a => a.caminho),
+        data_emissao:       dataEmissao,
+        anexos:             anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
       })
       // Vincula o arquivo que já foi gerado/salvo — evita gerar de
       // novo, reaproveita o mesmo PDF que o usuário acabou de escolher
@@ -420,7 +439,10 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
 
         {selecionado && (
           <>
-            <Input label="Centro de Custo" value={empresa?.nome ?? ''} disabled />
+            <div className="grid grid-cols-[1fr_160px] gap-4">
+              <Input label="Centro de Custo" value={empresa?.nome ?? ''} disabled />
+              <Input label="Data de Emissão" type="date" value={dataEmissao} onChange={e => setDataEmissao(e.target.value)} />
+            </div>
 
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-400">Descrição dos serviços / materiais</label>
@@ -514,6 +536,18 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
                     <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-hover">
                       <span className="text-xs text-gray-500 w-4 shrink-0">{i + 1}.</span>
                       <span className="text-sm text-gray-200 truncate flex-1">{a.nome}</span>
+                      <label
+                        title="Esse anexo também recebe o carimbo de quem aprovar a AP"
+                        className="flex items-center gap-1.5 text-xs text-gray-400 shrink-0 cursor-pointer select-none"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={a.vaiAssinatura}
+                          onChange={() => alternarVaiAssinatura(i)}
+                          className="accent-brand-500"
+                        />
+                        Vai Assinatura
+                      </label>
                       <button onClick={() => moverAnexo(i, -1)} disabled={i === 0} className="p-1 text-gray-500 hover:text-gray-200 disabled:opacity-30">
                         <ChevronUp size={13} />
                       </button>

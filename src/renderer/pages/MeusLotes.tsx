@@ -267,7 +267,7 @@ export default function MeusLotes() {
             {loteDetalhe.autorizacoes.length === 0 ? (
               <p className="text-sm text-gray-500">Nenhuma AP nesse lote.</p>
             ) : (
-              <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+              <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
                 {loteDetalhe.autorizacoes.map(a => (
                   <div key={a.id} className="flex items-center justify-between px-4 py-3 border-b border-surface-border/50 last:border-0">
                     <div>
@@ -298,7 +298,7 @@ export default function MeusLotes() {
             {loteDetalhe.notas_fiscais.length === 0 ? (
               <p className="text-sm text-gray-500">Nenhuma nota fiscal nesse lote.</p>
             ) : (
-              <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+              <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
                 {loteDetalhe.notas_fiscais.map(n => (
                   <div key={n.id} className="flex items-center justify-between px-4 py-3 border-b border-surface-border/50 last:border-0">
                     <div>

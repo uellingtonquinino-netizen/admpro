@@ -50,6 +50,11 @@ declare global {
       supervisor: Record<string, (...args: any[]) => Promise<any>>
       auth: Record<string, (...args: any[]) => Promise<any>>
       configuracoesEmail: Record<string, (...args: any[]) => Promise<any>>
+      folhaPagamento: Record<string, (...args: any[]) => Promise<any>>
+      obraEap: Record<string, (...args: any[]) => Promise<any>>
+      obraDiario: Record<string, (...args: any[]) => Promise<any>>
+      faturas: Record<string, (...args: any[]) => Promise<any>>
+      contratos: Record<string, (...args: any[]) => Promise<any>>
     }
   }
 }

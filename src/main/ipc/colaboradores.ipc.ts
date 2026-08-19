@@ -225,7 +225,16 @@ export function registerColaboradoresIpc() {
   // ── Excluir ─────────────────────────────────────────────
   ipcMain.handle('colaboradores:excluir', async (_e, id: number) => {
     if (getDatabaseProvider() === 'supabase') {
-      const { error } = await getSupabase().from('colaboradores').delete().eq('id', id)
+      const s = getSupabase()
+      const { data: colaborador } = await s.from('colaboradores').select('nome,cpf,empresa_id').eq('id', id).single()
+      if (colaborador) {
+        await s.rpc('registrar_exclusao', {
+          p_tabela: 'colaboradores', p_registro_id: id,
+          p_descricao: `Colaborador - ${colaborador.nome}${colaborador.cpf ? ` (CPF ${colaborador.cpf})` : ''}`,
+          p_empresa_id: colaborador.empresa_id,
+        })
+      }
+      const { error } = await s.from('colaboradores').delete().eq('id', id)
       if (error) throw new Error(error.message)
       return { ok: true }
     }
@@ -234,7 +243,19 @@ export function registerColaboradoresIpc() {
   })
 
   // ── Valores distintos p/ filtros (função, setor, equipe) ──
-  ipcMain.handle('colaboradores:opcoesFiltro', (_e, empresa_id: number) => {
+  ipcMain.handle('colaboradores:opcoesFiltro', async (_e, empresa_id: number) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const s = getSupabase()
+      const distintos = async (campo: 'funcao' | 'setor' | 'equipe') => {
+        const { data, error } = await s.from('colaboradores').select(campo).eq('empresa_id', empresa_id).not(campo, 'is', null)
+        if (error) throw new Error(error.message)
+        const linhas = (data ?? []) as unknown as Record<string, string>[]
+        const valores = new Set(linhas.map(r => r[campo]).filter(v => v && v !== ''))
+        return [...valores].sort()
+      }
+      const [funcoes, setores, equipes] = await Promise.all([distintos('funcao'), distintos('setor'), distintos('equipe')])
+      return { funcoes, setores, equipes }
+    }
     const col = (campo: string) => db.prepare(`
       SELECT DISTINCT ${campo} AS v FROM colaboradores
       WHERE empresa_id = ? AND ${campo} IS NOT NULL AND ${campo} != ''
@@ -249,7 +270,12 @@ export function registerColaboradoresIpc() {
   })
 
   // ── Histórico de documentos gerados ────────────────────
-  ipcMain.handle('colaboradores:historicoDocumentos', (_e, colaborador_id: number) => {
+  ipcMain.handle('colaboradores:historicoDocumentos', async (_e, colaborador_id: number) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const { data, error } = await getSupabase().from('colaborador_documentos').select('id,tipo,created_at').eq('colaborador_id', colaborador_id).order('created_at', { ascending: false }).limit(20)
+      if (error) throw new Error(error.message)
+      return data ?? []
+    }
     return db.prepare(`
       SELECT id, tipo, created_at
       FROM colaborador_documentos
@@ -260,12 +286,19 @@ export function registerColaboradoresIpc() {
   })
 
   // ── Registrar geração de documento (para auditoria) ────
-  ipcMain.handle('colaboradores:registrarDocumento', (_e, p: {
+  ipcMain.handle('colaboradores:registrarDocumento', async (_e, p: {
     colaborador_id: number
     empresa_id:     number
     tipo:           string
     dados_json:     string
   }) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const { error } = await getSupabase().from('colaborador_documentos').insert({
+        colaborador_id: p.colaborador_id, empresa_id: p.empresa_id, tipo: p.tipo, dados_json: p.dados_json,
+      })
+      if (error) throw new Error(error.message)
+      return { ok: true }
+    }
     db.prepare(`
       INSERT INTO colaborador_documentos (colaborador_id, empresa_id, tipo, dados_json)
       VALUES (@colaborador_id, @empresa_id, @tipo, @dados_json)
@@ -274,7 +307,14 @@ export function registerColaboradoresIpc() {
   })
 
   // ── Resumo de RH para a tela Início (equivalente à aba RESUMO) ──
-  ipcMain.handle('colaboradores:resumoRH', async (_e, empresa_id: number) => {
+  // CORRIGIDO: o filtro de mês/ano do Início nunca fazia nada — esse
+  // handler sempre usava o mês REAL de hoje pra achar aniversariante,
+  // ignorando qualquer mês escolhido na tela. Agora aceita um `mes`
+  // (1-12) opcional; se não vier, cai no mês atual (mesmo
+  // comportamento de antes).
+  ipcMain.handle('colaboradores:resumoRH', async (_e, p: number | { empresa_id: number; mes?: number }) => {
+    const empresa_id = typeof p === 'number' ? p : p.empresa_id
+    const mesFiltro   = typeof p === 'number' ? undefined : p.mes
     if (getDatabaseProvider() === 'supabase') {
       const { data, error } = await getSupabase()
         .from('colaboradores')
@@ -294,14 +334,14 @@ export function registerColaboradoresIpc() {
       }
       const hoje = new Date()
       const idades = ativos.filter(row => row.nascimento).map(row => (hoje.getTime() - new Date(`${row.nascimento}T00:00:00`).getTime()) / 31557600000)
-      const mesAtual = String(hoje.getMonth() + 1).padStart(2, '0')
+      const mesBusca = String(mesFiltro ?? hoje.getMonth() + 1).padStart(2, '0')
       return {
         totalAtivos: ativos.length,
         custoFolha: ativos.reduce((total, row) => total + Number(row.salario_base ?? 0), 0),
         mediaIdade: idades.length ? Math.round(idades.reduce((a, b) => a + b, 0) / idades.length) : null,
         porFuncao: [...porFuncao].map(([funcao, dados]) => ({ funcao, ...dados })).sort((a, b) => b.quantidade - a.quantidade),
         porStatus: [...porStatus].map(([status, quantidade]) => ({ status, quantidade })),
-        aniversariantes: ativos.filter(row => row.nascimento?.slice(5, 7) === mesAtual).sort((a, b) => (a.nascimento ?? '').slice(8, 10).localeCompare((b.nascimento ?? '').slice(8, 10))).map(row => ({ nome: row.nome, funcao: row.funcao, nascimento: row.nascimento })),
+        aniversariantes: ativos.filter(row => row.nascimento?.slice(5, 7) === mesBusca).sort((a, b) => (a.nascimento ?? '').slice(8, 10).localeCompare((b.nascimento ?? '').slice(8, 10))).map(row => ({ nome: row.nome, funcao: row.funcao, nascimento: row.nascimento })),
       }
     }
     const totais = db.prepare(`
@@ -331,13 +371,14 @@ export function registerColaboradoresIpc() {
       GROUP BY status
     `).all(empresa_id)
 
+    const mesBuscaSqlite = String(mesFiltro ?? new Date().getMonth() + 1).padStart(2, '0')
     const aniversariantes = db.prepare(`
       SELECT nome, funcao, nascimento
       FROM colaboradores
       WHERE empresa_id = ? AND status = 'ativo' AND nascimento IS NOT NULL
-        AND strftime('%m', nascimento) = strftime('%m', 'now')
+        AND strftime('%m', nascimento) = ?
       ORDER BY strftime('%d', nascimento) ASC
-    `).all(empresa_id)
+    `).all(empresa_id, mesBuscaSqlite)
 
     return {
       totalAtivos:    totais.total_ativos,

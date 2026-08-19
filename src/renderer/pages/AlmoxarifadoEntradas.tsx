@@ -21,6 +21,7 @@ interface Entrada {
   data:            string
   fornecedor_nome: string
   valor_desconto:  number
+  valor_acrescimo: number
   valor_total:     number
 }
 
@@ -89,7 +90,7 @@ export default function AlmoxarifadoEntradas() {
           description={busca ? 'Ajuste a busca acima.' : 'Clique em "Nova Entrada" para lançar a primeira nota.'}
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">

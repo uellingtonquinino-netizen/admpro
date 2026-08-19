@@ -9,10 +9,12 @@ import Badge             from '@components/ui/Badge'
 import ConfirmDialog      from '@components/ui/ConfirmDialog'
 import { gerarHtmlAP }   from '../documentos/ap'
 import { gerarCapaLote, ApCapaItem } from '../documentos/capaLote'
-import { aplicarCarimbosAP } from '../utils/carimbosAp'
+import { finalizarPdfAP } from '../utils/carimbosAp'
 import { formatCPF, formatCNPJ } from '../utils/documentValidators'
 import { bateComBusca } from '../utils/busca'
 import PainelEstoqueObra from '@components/almoxarifado/PainelEstoqueObra'
+import ResumoRHObra      from '@components/dashboard/ResumoRHObra'
+import PainelObra        from '@pages/PainelObra'
 import {
   Building2, Users, Wallet, FileWarning, ChevronRight, ArrowLeft,
   FileText, Receipt, CheckCircle2, Printer, FolderOutput, Trash2, Boxes,
@@ -202,6 +204,29 @@ export default function PainelSupervisor() {
     if (obraAtual) window.api.lotes.listarPorObra(obraAtual.empresa_id).then(setLotes)
   }
 
+  // NOVO: Supervisor também pode apagar um lote inteiro (antes só o
+  // ADM/Master conseguia) — a permissão de verdade é conferida no
+  // banco (só obras que ele realmente supervisiona), aqui é só a
+  // confirmação e a atualização da lista.
+  async function handleExcluirLote(lote: Lote) {
+    const ok = await confirm({
+      title:   'Excluir Lote',
+      danger:  true,
+      message: `Deseja excluir o lote "${lote.titulo}"? As AP's e Notas Fiscais dele voltam pra fora de qualquer lote — não são excluídas, só desvinculadas.`,
+    })
+    if (!ok) return
+    setProcessandoId(lote.id)
+    try {
+      await window.api.lotes.excluir(lote.id)
+      toast.success('Lote excluído.')
+      if (obraAtual) window.api.lotes.listarPorObra(obraAtual.empresa_id).then(setLotes)
+    } catch {
+      toast.error('Erro ao excluir o lote — confere se você supervisiona essa obra.')
+    } finally {
+      setProcessandoId(null)
+    }
+  }
+
   // ── Autorizar uma AP dentro do lote — mesma vaga de assinatura da
   // AP, só que quem assina é o Supervisor. Regera o PDF já com o
   // carimbo, igual o Gestor já faz.
@@ -251,16 +276,20 @@ export default function PainelSupervisor() {
         html, nomeArquivo: `AP - ${completa.beneficiario_nome}`, anexos: completa.anexos ?? [], pastaId: `AP_${item.id}`,
       })
       if (resultado.ok) {
-        await window.api.ap.salvarCaminhoPdf({ id: item.id, pdf_path: resultado.filePath })
         // Carimbo do Gestor (se já tiver aprovado antes) e do
-        // Supervisor (agora) — mesmo tamanho, lado a lado.
-        const carimbo = await aplicarCarimbosAP(resultado.filePath, {
+        // Supervisor (agora) — mesmo tamanho, lado a lado — e sobe o
+        // resultado final pro Storage, pra ADM/Gestor conseguirem
+        // abrir depois em outro computador (ver finalizarPdfAP).
+        const final = await finalizarPdfAP(resultado.filePath, completa.empresa_id, `AP_${item.id}`, {
           aprovado_por: completa.aprovado_por,
           aprovado_em: completa.aprovado_em,
           aprovado_supervisor_por: usuario.nome,
           aprovado_supervisor_em: aprovado_em,
         })
-        if (!carimbo.ok) toast.error(carimbo.erros.join(' '))
+        if (final.ok && final.caminho) {
+          await window.api.ap.salvarCaminhoPdf({ id: item.id, pdf_path: final.caminho })
+        }
+        if (!final.ok) toast.error(final.erros.join(' '))
       }
 
       toast.success('AP autorizada.')
@@ -342,10 +371,18 @@ export default function PainelSupervisor() {
     setProcessandoId(item.id)
     try {
       const completa = await window.api.ap.buscarPorId(item.id)
-      if (completa.pdf_path) {
-        await window.api.documentos.abrirArquivo(completa.pdf_path)
-      } else {
+      if (!completa.pdf_path) {
         toast.error('Essa AP ainda não tem um PDF pronto pra visualizar.')
+        return
+      }
+      const aberto = await window.api.documentos.abrirArquivo(completa.pdf_path)
+      if (!aberto.ok) {
+        // caminho salvo não abriu aqui (provavelmente local de outra
+        // máquina, de antes da correção do Storage) — a tela de
+        // Autorização de Pagamento (ADM/Gestor) já se autocorrige ao
+        // reimprimir; aqui só avisamos, pra não duplicar toda a
+        // lógica de montagem do HTML da AP.
+        toast.error('Não foi possível abrir esse PDF salvo (provavelmente de antes da correção). Peça pro ADM/Gestor reimprimir essa AP uma vez pra corrigir.')
       }
     } finally {
       setProcessandoId(null)
@@ -491,6 +528,23 @@ export default function PainelSupervisor() {
         </button>
         <h1 className="text-xl font-semibold text-white mb-1">{obraAtual?.empresa_nome}</h1>
 
+        {/* NOVO: mesmos cards de resumo (Colaboradores ativos, Custo
+            de Salários, Média de idade, Aniversariantes) que já
+            existiam prontos mas nunca tinham sido conectados aqui —
+            aparecem ACIMA de Programação Financeira, ao entrar numa
+            obra específica. */}
+        {obraAtual && <ResumoRHObra empresaId={obraAtual.empresa_id} />}
+
+        {/* NOVO: avanço físico da obra (EAP + Diário de Obra) — mesmo
+            componente usado no menu do ADM/Gestor, aqui embutido sem
+            o próprio cabeçalho (já tem o nome da obra acima) e preso
+            na obra que o Supervisor está vendo no momento. */}
+        {obraAtual && (
+          <div className="mb-4">
+            <PainelObra empresaId={obraAtual.empresa_id} mostrarCabecalho={false} />
+          </div>
+        )}
+
         {/* Caixa 1 — Programação Financeira (já existia) */}
         <div className="bg-surface border border-surface-border rounded-2xl p-5 mb-4">
           <div className="flex items-center gap-2 mb-4">
@@ -509,17 +563,26 @@ export default function PainelSupervisor() {
           ) : (
             <div className="space-y-2">
               {lotesFiltrado.map(l => (
-                <button
+                <div
                   key={l.id}
-                  onClick={() => abrirLote(l)}
-                  className="w-full flex items-center justify-between bg-surface-hover border border-surface-border rounded-xl px-4 py-3.5 hover:border-brand-500/50 transition-colors text-left"
+                  className="flex items-center justify-between bg-surface-hover border border-surface-border rounded-xl px-4 py-3.5 hover:border-brand-500/50 transition-colors"
                 >
-                  <div>
+                  <button onClick={() => abrirLote(l)} className="flex-1 min-w-0 text-left">
                     <p className="text-sm font-medium text-white">{l.titulo}</p>
                     <p className="text-xs text-gray-500 mt-0.5">{l.itens_aprovados} de {l.total_itens} itens autorizados</p>
+                  </button>
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    {l.pendente ? <Badge color="yellow">Pendente</Badge> : <Badge color="green">Concluído</Badge>}
+                    <button
+                      onClick={() => handleExcluirLote(l)}
+                      disabled={processandoId === l.id}
+                      title="Excluir Lote"
+                      className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </div>
-                  {l.pendente ? <Badge color="yellow">Pendente</Badge> : <Badge color="green">Concluído</Badge>}
-                </button>
+                </div>
               ))}
             </div>
           )}

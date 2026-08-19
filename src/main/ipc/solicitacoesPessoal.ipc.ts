@@ -172,4 +172,12 @@ export function registerSolicitacoesPessoalIpc() {
     `).run(id)
     return { ok: true }
   })
+
+  // ── NOVO: excluir uma solicitação (acesso ADM) — os anexos saem
+  // junto, em cascata (ON DELETE CASCADE nas duas bases).
+  ipcMain.handle('solicitacoesPessoal:excluir', async (_e, id: number) => {
+    if(getDatabaseProvider()==='supabase') { const {error}=await getSupabase().from('solicitacoes_pessoal').delete().eq('id',id);if(error)throw new Error(error.message);return {ok:true} }
+    db.prepare(`DELETE FROM solicitacoes_pessoal WHERE id = ?`).run(id)
+    return { ok: true }
+  })
 }

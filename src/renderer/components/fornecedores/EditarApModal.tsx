@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useEmpresaStore } from '@store/empresa.store'
 import { toast }     from '@components/ui/ToastContainer'
 import Modal         from '@components/ui/Modal'
@@ -6,7 +6,13 @@ import Button        from '@components/ui/Button'
 import Input         from '@components/ui/Input'
 import { gerarHtmlAP }           from '../../documentos/ap'
 import { formatCPF, formatCNPJ } from '../../utils/documentValidators'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Paperclip, ChevronUp, ChevronDown } from 'lucide-react'
+
+interface Anexo {
+  nome:    string
+  caminho: string
+  vaiAssinatura: boolean
+}
 
 interface Boleto {
   valor:      string
@@ -22,8 +28,9 @@ interface ApRegistro {
   observacoes:        string | null
   solicitante:        string | null
   autorizado_por:     string | null
+  data_emissao?:      string | null
   boletos:            { valor: number; vencimento: string }[]
-  anexos?:            string[]
+  anexos?:            { caminho: string; vaiAssinatura: boolean }[]
 }
 
 interface Props {
@@ -42,6 +49,19 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
   const empresa = useEmpresaStore(s => s.empresa)
   const [nome, setNome]               = useState(registro.beneficiario_nome)
   const [descricao, setDescricao]     = useState(registro.descricao ?? '')
+  const [dataEmissao, setDataEmissao] = useState(registro.data_emissao?.slice(0, 10) ?? new Date().toISOString().slice(0, 10))
+  // NOVO: anexos agora dá pra adicionar/remover/reordenar na edição
+  // (antes só era possível na hora de criar) — os que já existiam
+  // (supabase://... ou caminho local, dependendo do provedor) entram
+  // com um nome derivado do próprio caminho, já que o nome original
+  // do arquivo não fica guardado em lugar nenhum.
+  const [anexos, setAnexos] = useState<Anexo[]>(
+    (registro.anexos ?? []).map(item => ({
+      nome: item.caminho.split(/[\\/]/).pop() ?? item.caminho,
+      caminho: item.caminho,
+      vaiAssinatura: item.vaiAssinatura,
+    }))
+  )
   const [boletos, setBoletos]         = useState<Boleto[]>(
     registro.boletos.length > 0
       ? registro.boletos.map(b => ({ valor: String(b.valor), vencimento: b.vencimento }))
@@ -52,6 +72,7 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
   const [autorizadoPor, setAutorizadoPor] = useState(registro.autorizado_por ?? '')
   const [salvando, setSalvando]       = useState(false)
   const [ehBoleto, setEhBoleto]       = useState(false)
+  const inputArquivoRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (registro.beneficiario_tipo !== 'fornecedor') return
@@ -70,6 +91,38 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
 
   function removerBoleto(i: number) {
     setBoletos(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  // ── Anexos (nota/recibo, boletos, medição etc.) ─────────
+  function handleSelecionarArquivos(e: React.ChangeEvent<HTMLInputElement>) {
+    const arquivos = Array.from(e.target.files ?? [])
+    const novos: Anexo[] = arquivos.map(f => ({
+      nome:    f.name,
+      caminho: (f as unknown as { path: string }).path,
+      vaiAssinatura: false,
+    }))
+    setAnexos(prev => [...prev, ...novos])
+    e.target.value = ''
+  }
+
+  // NOVO: marca esse anexo pra também receber o carimbo de quem
+  // aprovar a AP (canto inferior direito).
+  function alternarVaiAssinatura(i: number) {
+    setAnexos(prev => prev.map((a, idx) => (idx === i ? { ...a, vaiAssinatura: !a.vaiAssinatura } : a)))
+  }
+
+  function removerAnexo(i: number) {
+    setAnexos(prev => prev.filter((_, idx) => idx !== i))
+  }
+
+  function moverAnexo(i: number, direcao: -1 | 1) {
+    setAnexos(prev => {
+      const novo = [...prev]
+      const alvo = i + direcao
+      if (alvo < 0 || alvo >= novo.length) return prev
+      ;[novo[i], novo[alvo]] = [novo[alvo], novo[i]]
+      return novo
+    })
   }
 
   const total = boletos.reduce((soma, b) => soma + (Number(b.valor.toString().replace(',', '.')) || 0), 0)
@@ -94,12 +147,15 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
         observacoes,
         solicitante,
         autorizado_por: autorizadoPor,
+        data_emissao: dataEmissao,
+        anexos: anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
       })
 
-      // NOVO: se essa AP tem anexos, a cópia pronta pra reimpressão
-      // (AP + anexos) precisa ser refeita com os valores atualizados —
-      // senão continuaria mostrando os dados de antes da edição.
-      if (registro.anexos && registro.anexos.length > 0 && empresa) {
+      // NOVO: sempre regenera a cópia pronta pra reimpressão ao
+      // salvar uma edição — com anexo ou sem (antes só regenerava se
+      // sobrasse pelo menos 1 anexo; apagar todos deixava a AP sem
+      // PDF pronto até a próxima vez que alguém clicasse Imprimir).
+      if (empresa) {
         await regenerarPdfComAnexos()
       }
 
@@ -116,6 +172,13 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
     if (!empresa) return
     try {
       const empresaAtual = await window.api.empresas.buscarPorId(empresa.id)
+      // NOVO: busca o estado de aprovação ATUAL da AP — se ela já foi
+      // aprovada (por Gestor/ADM e/ou Supervisor), o carimbo
+      // correspondente precisa continuar aparecendo mesmo depois de
+      // uma edição. Antes essa função nunca buscava isso, e qualquer
+      // edição que disparasse a regeneração (mexer nos anexos) saía
+      // sem carimbo nenhum, mesmo numa AP já aprovada.
+      const completa = await window.api.ap.buscarPorId(registro.id)
 
       let documento = ''
       let banco: string | null = null, agencia: string | null = null
@@ -149,13 +212,23 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
         observacoes,
         solicitante,
         autorizadoPor,
+        dataEmissao:      dataEmissao.split('-').reverse().join('/'),
+        // NOVO: carimbo de quem já aprovou a AP (se já aprovada),
+        // pra não sumir numa edição posterior.
+        carimboUrl:       completa.aprovado_por_carimbo_url ?? null,
       })
 
       const resultado = await window.api.documentos.salvarPdfInterno({
         html,
         nomeArquivo: `AP - ${nome}`,
-        anexos:      registro.anexos,
+        anexos:      anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
         pastaId:     `AP_${registro.id}`,
+        empresa_id:  empresa.id,
+        // NOVO: mesmo carimbo pros anexos marcados "Vai Assinatura" —
+        // só existe se a AP já tiver sido aprovada por alguém.
+        carimbo: completa.aprovado_por
+          ? { aprovadoPor: completa.aprovado_por, aprovadoEm: completa.aprovado_em, carimboBase64: completa.aprovado_por_carimbo_url ?? null }
+          : undefined,
       })
       if (resultado.ok) {
         await window.api.ap.salvarCaminhoPdf({ id: registro.id, pdf_path: resultado.filePath })
@@ -169,7 +242,10 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
   return (
     <Modal open onClose={onClose} title="Editar Autorização de Pagamento" size="lg">
       <div className="space-y-4">
-        <Input label="Beneficiário" value={nome} onChange={e => setNome(e.target.value)} />
+        <div className="grid grid-cols-[1fr_160px] gap-4">
+          <Input label="Beneficiário" value={nome} onChange={e => setNome(e.target.value)} />
+          <Input label="Data de Emissão" type="date" value={dataEmissao} onChange={e => setDataEmissao(e.target.value)} />
+        </div>
 
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-gray-400">Descrição dos serviços / materiais</label>
@@ -228,6 +304,65 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input label="Solicitante" value={solicitante} onChange={e => setSolicitante(e.target.value)} />
           <Input label="Autorizado por" value={autorizadoPor} onChange={e => setAutorizadoPor(e.target.value)} />
+        </div>
+
+        {/* NOVO: anexos agora dá pra mexer aqui também — antes só na
+            hora de criar a AP. */}
+        <div className="border-t border-surface-border pt-4">
+          <p className="text-xs font-semibold text-brand-400 uppercase tracking-wide mb-2">
+            Anexar documentos (nota/recibo, boletos, medição…)
+          </p>
+          <input
+            ref={inputArquivoRef}
+            type="file"
+            multiple
+            accept=".pdf,.jpg,.jpeg,.png"
+            onChange={handleSelecionarArquivos}
+            className="hidden"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Paperclip size={13} />}
+            onClick={() => inputArquivoRef.current?.click()}
+          >
+            Escolher arquivos
+          </Button>
+
+          {anexos.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {anexos.map((a, i) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-hover">
+                  <span className="text-xs text-gray-500 w-4 shrink-0">{i + 1}.</span>
+                  <span className="text-sm text-gray-200 truncate flex-1">{a.nome}</span>
+                  <label
+                    title="Esse anexo também recebe o carimbo de quem aprovar a AP"
+                    className="flex items-center gap-1.5 text-xs text-gray-400 shrink-0 cursor-pointer select-none"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={a.vaiAssinatura}
+                      onChange={() => alternarVaiAssinatura(i)}
+                      className="accent-brand-500"
+                    />
+                    Vai Assinatura
+                  </label>
+                  <button onClick={() => moverAnexo(i, -1)} disabled={i === 0} className="p-1 text-gray-500 hover:text-gray-200 disabled:opacity-30">
+                    <ChevronUp size={13} />
+                  </button>
+                  <button onClick={() => moverAnexo(i, 1)} disabled={i === anexos.length - 1} className="p-1 text-gray-500 hover:text-gray-200 disabled:opacity-30">
+                    <ChevronDown size={13} />
+                  </button>
+                  <button onClick={() => removerAnexo(i)} className="p-1 text-gray-500 hover:text-red-400">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+              <p className="text-xs text-gray-500 mt-1">
+                A AP sai primeiro, seguida destes documentos nessa ordem.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

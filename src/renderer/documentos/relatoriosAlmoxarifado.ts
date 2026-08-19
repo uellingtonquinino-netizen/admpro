@@ -101,6 +101,40 @@ export function gerarRelatorioMovimentacao(
   )
 }
 
+// ── NOVO: Relatório de Estoque Mínimo (quem está no limite ou
+// abaixo, mas ainda tem alguma unidade — "zerado" é um relatório à
+// parte, mais urgente) ──────────────────────────────────────
+export function gerarRelatorioEstoqueMinimo(empresa: EmpresaInfo, itens: ProdutoLinha[]): string {
+  const linhas = itens.map(p => [p.codigo, p.nome, p.unidade ?? '—', String(p.estoque_atual)])
+  return envolver(
+    'Relatório de Estoque Mínimo',
+    empresa,
+    'Materiais/Ferramentas no limite do estoque mínimo ou abaixo dele',
+    tabela(['Código', 'Material/Ferramenta', 'Unidade', 'Estoque atual'], linhas)
+  )
+}
+
+// ── NOVO: Relatório de Estoque Zerado ──────────────────────
+export function gerarRelatorioEstoqueZerado(empresa: EmpresaInfo, itens: ProdutoLinha[]): string {
+  const linhas = itens.map(p => [p.codigo, p.nome, p.unidade ?? '—'])
+  return envolver(
+    'Relatório de Estoque Zerado',
+    empresa,
+    'Materiais/Ferramentas sem nenhuma unidade em estoque',
+    tabela(['Código', 'Material/Ferramenta', 'Unidade'], linhas)
+  )
+}
+
+// ── NOVO: Relatório de Materiais por Categoria ─────────────
+export function gerarRelatorioPorCategoria(empresa: EmpresaInfo, categoria: string, itens: ProdutoLinha[]): string {
+  const linhas = itens.map(p => [p.codigo, p.nome, p.unidade ?? '—', String(p.estoque_atual)])
+  return envolver(
+    'Relatório de Materiais por Categoria',
+    empresa,
+    `Categoria: ${categoria}`,
+    tabela(['Código', 'Material/Ferramenta', 'Unidade', 'Estoque atual'], linhas)
+  )
+}
 // ── NOVO: Relatório de materiais/ferramentas alugados ──────
 const LABEL_PERIODO: Record<string, string> = { diario: 'Diário', semanal: 'Semanal', mensal: 'Mensal', anual: 'Anual' }
 

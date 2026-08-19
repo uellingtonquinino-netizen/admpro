@@ -13,6 +13,7 @@ interface Produto {
   nome:            string
   descricao:       string | null
   unidade:         string | null
+  categoria:       string | null
   estoque_atual:   number
   estoque_minimo:  number
   valor_unitario:  number
@@ -54,6 +55,8 @@ export default function ProdutoModal({ open, onClose, onSaved, produto }: Props)
   const [nome, setNome]         = useState(produto?.nome ?? '')
   const [descricao, setDescricao] = useState(produto?.descricao ?? '')
   const [unidade, setUnidade]   = useState(produto?.unidade ?? 'UN')
+  const [categoria, setCategoria] = useState(produto?.categoria ?? '')
+  const [categorias, setCategorias] = useState<string[]>([])
   const [estoqueAtual, setEstoqueAtual]   = useState(String(produto?.estoque_atual ?? 0))
   const [estoqueMinimo, setEstoqueMinimo] = useState(String(produto?.estoque_minimo ?? 0))
   const [valorUnitario, setValorUnitario] = useState(String(produto?.valor_unitario ?? 0))
@@ -89,6 +92,11 @@ export default function ProdutoModal({ open, onClose, onSaved, produto }: Props)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    if (!empresaId) return
+    window.api.produtos.categorias(empresaId).then(setCategorias).catch(() => {})
+  }, [empresaId])
+
   async function handleSalvar() {
     if (!nome.trim())    { toast.error('Informe o nome do material/ferramenta.'); return }
     if (!empresaId) return
@@ -101,6 +109,7 @@ export default function ProdutoModal({ open, onClose, onSaved, produto }: Props)
         nome:           nome.trim(),
         descricao,
         unidade,
+        categoria: categoria.trim() || null,
         estoque_atual:  Number(estoqueAtual.toString().replace(',', '.')) || 0,
         estoque_minimo: Number(estoqueMinimo.toString().replace(',', '.')) || 0,
         valor_unitario: Number(valorUnitario.toString().replace(',', '.')) || 0,
@@ -138,6 +147,20 @@ export default function ProdutoModal({ open, onClose, onSaved, produto }: Props)
             onChange={e => setCodigo(e.target.value)}
           />
           <Input label="Unidade" value={unidade} onChange={e => setUnidade(e.target.value)} placeholder="UN, KG, M..." />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-400 mb-1">Categoria</label>
+          <input
+            list="lista-categorias-produto"
+            className="input"
+            value={categoria}
+            onChange={e => setCategoria(e.target.value.toUpperCase())}
+            placeholder="Ex: Ferramentas, EPI, Material de Construção…"
+          />
+          <datalist id="lista-categorias-produto">
+            {categorias.map(c => <option key={c} value={c} />)}
+          </datalist>
         </div>
         {!produto && (
           <p className="text-xs text-gray-500 -mt-2">Código gerado automaticamente, em sequência.</p>

@@ -19,6 +19,7 @@ interface EntradaPayload {
   fornecedor_id?:  number | null
   fornecedor_nome: string
   valor_desconto?: number
+  valor_acrescimo?: number
   itens:           ItemEntrada[]
 }
 
@@ -63,16 +64,17 @@ export function registerAlmoxarifadoEntradasIpc() {
 
     const subtotal = p.itens.reduce((soma, i) => soma + i.quantidade * i.valor_unitario, 0)
     const desconto = p.valor_desconto ?? 0
-    const total = Math.max(subtotal - desconto, 0)
+    const acrescimo = p.valor_acrescimo ?? 0
+    const total = Math.max(subtotal - desconto + acrescimo, 0)
 
     const criar = db.transaction(() => {
       const resultEntrada = db.prepare(`
         INSERT INTO almoxarifado_entradas (
           empresa_id, numero_nota, numero_pedido, data, fornecedor_id, fornecedor_nome,
-          valor_desconto, valor_total
+          valor_desconto, valor_acrescimo, valor_total
         ) VALUES (
           @empresa_id, @numero_nota, @numero_pedido, @data, @fornecedor_id, @fornecedor_nome,
-          @valor_desconto, @valor_total
+          @valor_desconto, @valor_acrescimo, @valor_total
         )
       `).run({
         empresa_id:      p.empresa_id,
@@ -82,6 +84,7 @@ export function registerAlmoxarifadoEntradasIpc() {
         fornecedor_id:   p.fornecedor_id ?? null,
         fornecedor_nome: p.fornecedor_nome,
         valor_desconto:  desconto,
+        valor_acrescimo: acrescimo,
         valor_total:     total,
       })
       const entradaId = resultEntrada.lastInsertRowid as number

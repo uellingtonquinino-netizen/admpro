@@ -118,7 +118,18 @@ export function registerFornecedoresIpc() {
   })
 
   ipcMain.handle('fornecedores:excluir', async (_e, id: number) => {
-    if (getDatabaseProvider() === 'supabase') { const { error } = await getSupabase().from('fornecedores').delete().eq('id', id); if (error) throw new Error(error.message); return { ok: true } }
+    if (getDatabaseProvider() === 'supabase') {
+      const s = getSupabase()
+      const { data: fornecedor } = await s.from('fornecedores').select('nome,cnpj,cpf,empresa_id').eq('id', id).single()
+      if (fornecedor) {
+        await s.rpc('registrar_exclusao', {
+          p_tabela: 'fornecedores', p_registro_id: id,
+          p_descricao: `Fornecedor - ${fornecedor.nome}`,
+          p_empresa_id: fornecedor.empresa_id,
+        })
+      }
+      const { error } = await s.from('fornecedores').delete().eq('id', id); if (error) throw new Error(error.message); return { ok: true }
+    }
     db.prepare('DELETE FROM fornecedores WHERE id = ?').run(id)
     return { ok: true }
   })

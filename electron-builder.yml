@@ -1,6 +1,13 @@
 appId: com.otimizzai.app
-productName: Otimizzai
-copyright: Copyright © 2026 Otimizzai
+# O appId acima fica do jeito que está DE PROPÓSITO, mesmo o nome
+# exibido já tendo mudado umas duas vezes (Otimizzai → ADM PRO OBRAS
+# → ADM OBRA) — é o identificador interno que o Windows usa pra saber
+# que é "o mesmo programa" entre uma versão e outra. Se esse valor
+# mudasse, quem já tem o programa instalado ganharia uma instalação
+# NOVA e separada em vez de receber a atualização normalmente — o
+# nome exibido muda sozinho na próxima atualização, sem duplicar nada.
+productName: ADM OBRA
+copyright: Copyright © 2026 ADM OBRA
 
 directories:
   output: dist-electron
@@ -15,6 +22,14 @@ files:
 extraResources:
   - from: resources
     to: resources
+  # NOVO: sem isso, o .env nunca ia parar dentro do instalador — o
+  # programa instalado ficava sem saber qual banco usar e sem as
+  # credenciais do Supabase, caindo sempre pro SQLite local sem avisar
+  # ninguém. Precisa existir um arquivo ".env" (não commitado, com
+  # valores reais) na raiz do projeto na hora de rodar
+  # "npm run dist:win:publish" — veja .env.example pro formato.
+  - from: .env
+    to: .env
 
 win:
   icon: build/icons/icon.ico
@@ -29,3 +44,26 @@ nsis:
   uninstallerIcon: build/icons/icon.ico
   createDesktopShortcut: always
   createStartMenuShortcut: true
+
+# NOVO: onde o programa procura (e onde a gente publica) as
+# atualizações — GitHub Releases do próprio repositório. Pra publicar
+# uma versão nova, precisa de um token do GitHub (variável de
+# ambiente GH_TOKEN) na hora de rodar o comando de publicação — é
+# gerado direto no GitHub, em Settings > Developer settings > Personal
+# access tokens, com permissão "repo".
+#
+# CORRIGIDO: sem "releaseType: release", o electron-builder cria a
+# release como RASCUNHO por padrão — o autoUpdater dos programas já
+# instalados não enxerga rascunho, só release publicada de verdade.
+#
+# DECIDIDO: repositório fica PÚBLICO — chegou a ser testado como
+# privado, mas o electron-updater usa um endpoint (releases.atom) que
+# só funciona com token clássico (não fine-grained), e mesmo assim
+# toda máquina já instalada antes da mudança ficaria "presa" sem
+# conseguir se atualizar sozinha, precisando de reinstalação manual
+# única. Não valia a pena pra esse caso.
+publish:
+  provider: github
+  owner: uellingtonquinino-netizen
+  repo: admpro
+  releaseType: release

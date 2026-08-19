@@ -56,6 +56,9 @@ export default function NotasFiscais() {
   const empresaId  = useEmpresaStore(s => s.empresaId)
   const usuario    = useAuthStore(s => s.usuario)
   const somenteLeitura = usuario?.perfil === 'gestor'
+  // NOVO: por padrão só o Gestor aprova — ADM só se o Master tiver
+  // marcado a permissão extra "aprovar-documentos" pra ele.
+  const podeAprovar = usuario?.perfil !== 'admin' || !!usuario?.permissoes_extras?.includes('aprovar-documentos')
   const { format } = useCurrency()
   const { confirm, dialogProps } = useConfirm()
 
@@ -99,8 +102,9 @@ export default function NotasFiscais() {
         dataFim:    dataFim || undefined,
       })
       setNotas(data)
-    } catch {
-      toast.error('Erro ao carregar as notas fiscais.')
+    } catch (erro) {
+      console.error('Erro ao carregar as notas fiscais.', erro)
+      toast.error(`Erro ao carregar as notas fiscais: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setLoading(false)
     }
@@ -166,8 +170,9 @@ export default function NotasFiscais() {
       fetchNotas()
       carregarResumo()
       carregarLotesAbertos()
-    } catch {
-      toast.error('Erro ao excluir.')
+    } catch (erro) {
+      console.error('Erro ao excluir.', erro)
+      toast.error(`Erro ao excluir: ${erro instanceof Error ? erro.message : String(erro)}`)
     }
   }
 
@@ -192,22 +197,26 @@ export default function NotasFiscais() {
       const { aprovado_em } = await window.api.notasFiscais.aprovar({ id: n.id, aprovado_por: usuario.nome, usuario_id: usuario.id })
 
       // Carimbo fica só na Nota Fiscal (não no boleto), sobreposto no
-      // canto inferior esquerdo da primeira página, leve transparência
-      // — mesmo tamanho do carimbo do Supervisor, pra ficarem
-      // consistentes um do lado do outro.
+      // canto inferior esquerdo da primeira página — mesma posição de
+      // sempre. CORRIGIDO: não estava passando a imagem do carimbo do
+      // usuário, então sempre caía no carimbo de texto ("Aprovado por
+      // X em Y"), mesmo pra quem já tinha subido uma imagem em
+      // Configurações.
       if (n.nota_pdf_path) {
         await window.api.documentos.carimbarPrimeiraPagina({
           caminhoPdf:  n.nota_pdf_path,
           aprovadoPor: usuario.nome,
           aprovadoEm:  aprovado_em,
+          carimboBase64: usuario.carimbo_url ?? null,
           posicao: 'inferior-esquerdo', tamanho: 'pequeno',
         })
       }
 
       toast.success('Nota Fiscal autorizada.')
       fetchNotas()
-    } catch {
-      toast.error('Erro ao autorizar a nota fiscal.')
+    } catch (erro) {
+      console.error('Erro ao autorizar a nota fiscal.', erro)
+      toast.error(`Erro ao autorizar a nota fiscal: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setAutorizandoId(null)
     }
@@ -244,8 +253,9 @@ export default function NotasFiscais() {
 
       toast.success(`${resultado.copiados} de ${resultado.total} arquivo(s) copiados para a pasta.`)
       setSelecionados(new Set())
-    } catch {
-      toast.error('Erro ao gerar o lote.')
+    } catch (erro) {
+      console.error('Erro ao gerar o lote.', erro)
+      toast.error(`Erro ao gerar o lote: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setGerandoLote(false)
     }
@@ -281,8 +291,9 @@ export default function NotasFiscais() {
       )
       const resultado = await window.api.documentos.imprimir({ html, nomeArquivo: titulo, landscape: true })
       if (!resultado.ok && !resultado.canceled) toast.error('Erro ao gerar a capa.')
-    } catch {
-      toast.error('Erro ao gerar a capa.')
+    } catch (erro) {
+      console.error('Erro ao gerar a capa.', erro)
+      toast.error(`Erro ao gerar a capa: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setGerandoCapa(false)
     }
@@ -324,7 +335,15 @@ export default function NotasFiscais() {
   }
 
   // NOVO: manda o lote já fechado pro Supervisor.
+  // NOVO: pede confirmação antes — estava enviando direto no clique,
+  // sem chance de desfazer/conferir antes (mesma correção da AP).
   async function handleEnviarLote(loteId: number) {
+    const ok = await confirm({
+      title:   'Enviar lote para o Supervisor',
+      message: 'Deseja enviar este lote para aprovação do Supervisor? Depois de enviado, ele sai daqui e entra no fluxo normal de aprovação.',
+    })
+    if (!ok) return
+
     setEnviandoLoteId(loteId)
     try {
       await window.api.lotes.enviarParaSupervisor({ lote_ids: [loteId] })
@@ -379,8 +398,9 @@ export default function NotasFiscais() {
       toast.success('Retirado do lote.')
       fetchNotas()
       carregarLotesAbertos()
-    } catch {
-      toast.error('Erro ao tirar do lote.')
+    } catch (erro) {
+      console.error('Erro ao tirar do lote.', erro)
+      toast.error(`Erro ao tirar do lote: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setTirandoDoLoteId(null)
     }
@@ -451,7 +471,7 @@ export default function NotasFiscais() {
             >
               <Receipt size={13} />
             </button>
-            {!n.aprovado_por && (
+            {!n.aprovado_por && podeAprovar && (
               <button
                 onClick={() => handleAutorizar(n)}
                 disabled={autorizandoId === n.id}
@@ -671,7 +691,7 @@ export default function NotasFiscais() {
           action={somenteLeitura ? undefined : { label: 'Nova nota', onClick: handleNova }}
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">

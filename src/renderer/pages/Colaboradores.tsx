@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useLocation }                       from 'react-router-dom'
 import { useEmpresaStore }                   from '@store/empresa.store'
+import { useAuthStore }                      from '@store/auth.store'
 import { useDebounce }                       from '@hooks/useDebounce'
 import { useConfirm }                        from '@hooks/useConfirm'
 import { toast }                             from '@components/ui/ToastContainer'
@@ -17,11 +18,12 @@ import ColaboradorModal                      from '@components/colaboradores/Col
 import GerarDocumentoModal                   from '@components/colaboradores/GerarDocumentoModal'
 import EmitirAPModal                         from '@components/fornecedores/EmitirAPModal'
 import AcordoCompensacaoModal                from '@components/colaboradores/AcordoCompensacaoModal'
+import ProtocoloEntregaModal                 from '@components/colaboradores/ProtocoloEntregaModal'
 import { clsx }                              from 'clsx'
 import {
   Plus, Search, Users, Pencil, Trash2,
   ChevronLeft, ChevronRight, FileText, DollarSign,
-  Download, Upload,
+  Download, Upload, Package,
 } from 'lucide-react'
 
 interface Colaborador {
@@ -65,6 +67,10 @@ export default function Colaboradores() {
   const empresaId = useEmpresaStore(s => s.empresaId)
   const location   = useLocation()
   const { confirm, dialogProps } = useConfirm()
+  // NOVO: Gestor só visualiza, filtra e gera relatório/documento —
+  // editar, apagar e emitir AP não são atribuições dele nessa tela.
+  // Mesma convenção já usada no Almoxarifado.
+  const somenteLeitura = useAuthStore(s => s.usuario?.perfil === 'gestor')
 
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
   const [total,         setTotal]         = useState(0)
@@ -75,6 +81,7 @@ export default function Colaboradores() {
   const [gerandoDoc,    setGerandoDoc]    = useState<Colaborador | null>(null)
   const [apPara,        setApPara]        = useState<Colaborador | null>(null)
   const [acordoOpen,    setAcordoOpen]    = useState(false)
+  const [protocoloOpen, setProtocoloOpen] = useState(false)
   const [importando,    setImportando]    = useState(false)
 
   const [opcoes, setOpcoes] = useState<{ funcoes: string[]; setores: string[]; equipes: string[] }>({
@@ -205,22 +212,33 @@ export default function Colaboradores() {
         </Button>
         <Button
           variant="outline"
-          icon={<Download size={15} />}
-          onClick={handleBaixarModelo}
+          icon={<Package size={15} />}
+          onClick={() => setProtocoloOpen(true)}
         >
-          Baixar modelo Excel
+          Protocolo de Entrega
         </Button>
-        <Button
-          variant="outline"
-          icon={<Upload size={15} />}
-          onClick={handleImportar}
-          loading={importando}
-        >
-          Importar Excel
-        </Button>
-        <Button icon={<Plus size={15} />} onClick={handleNovo}>
-          Novo colaborador
-        </Button>
+        {!somenteLeitura && (
+          <>
+            <Button
+              variant="outline"
+              icon={<Download size={15} />}
+              onClick={handleBaixarModelo}
+            >
+              Baixar modelo Excel
+            </Button>
+            <Button
+              variant="outline"
+              icon={<Upload size={15} />}
+              onClick={handleImportar}
+              loading={importando}
+            >
+              Importar Excel
+            </Button>
+            <Button icon={<Plus size={15} />} onClick={handleNovo}>
+              Novo colaborador
+            </Button>
+          </>
+        )}
       </PageHeader>
 
       {/* Filtros */}
@@ -275,7 +293,7 @@ export default function Colaboradores() {
           action={{ label: 'Novo colaborador', onClick: handleNovo }}
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">
@@ -316,13 +334,15 @@ export default function Colaboradores() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1 justify-end">
-                      <button
-                        onClick={() => setApPara(c)}
-                        title="Emitir Autorização de Pagamento"
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-                      >
-                        <DollarSign size={14} />
-                      </button>
+                      {!somenteLeitura && (
+                        <button
+                          onClick={() => setApPara(c)}
+                          title="Emitir Autorização de Pagamento"
+                          className="p-1.5 rounded-lg text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                        >
+                          <DollarSign size={14} />
+                        </button>
+                      )}
                       <button
                         onClick={() => setGerandoDoc(c)}
                         title="Gerar documento"
@@ -330,18 +350,22 @@ export default function Colaboradores() {
                       >
                         <FileText size={14} />
                       </button>
-                      <button
-                        onClick={() => handleEditar(c)}
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-gray-200 hover:bg-surface-hover transition-colors"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleExcluir(c)}
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {!somenteLeitura && (
+                        <>
+                          <button
+                            onClick={() => handleEditar(c)}
+                            className="p-1.5 rounded-lg text-gray-500 hover:text-gray-200 hover:bg-surface-hover transition-colors"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleExcluir(c)}
+                            className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -401,6 +425,10 @@ export default function Colaboradores() {
 
       {acordoOpen && (
         <AcordoCompensacaoModal onClose={() => setAcordoOpen(false)} />
+      )}
+
+      {protocoloOpen && (
+        <ProtocoloEntregaModal onClose={() => setProtocoloOpen(false)} />
       )}
 
       <ConfirmDialog {...dialogProps} />

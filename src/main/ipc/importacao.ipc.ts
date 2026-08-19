@@ -1,10 +1,27 @@
 import { ipcMain, dialog, BrowserWindow, type OpenDialogOptions, type SaveDialogOptions } from 'electron'
 import * as XLSX  from 'xlsx'
 import { getDb }  from '../database/connection'
+import { getDatabaseProvider, getSupabase } from '../supabase/client'
 
 // Mapeamento entre o rótulo em português (cabeçalho da planilha) e a
 // coluna real no banco de dados — usado tanto para gerar o modelo
 // quanto para ler a importação, garantindo que os dois lados batem.
+// Mesma ideia do mapeamento de colaboradores, só que pro cadastro de
+// Material/Ferramenta do Almoxarifado.
+const CAMPOS_IMPORTACAO_PRODUTOS: { rotulo: string; campo: string; tipo?: 'numero' | 'booleano' | 'data' }[] = [
+  { rotulo: 'Nome',                                   campo: 'nome' },
+  { rotulo: 'Descrição',                              campo: 'descricao' },
+  { rotulo: 'Unidade',                                campo: 'unidade' },
+  { rotulo: 'Estoque atual',                          campo: 'estoque_atual', tipo: 'numero' },
+  { rotulo: 'Estoque mínimo',                         campo: 'estoque_minimo', tipo: 'numero' },
+  { rotulo: 'Valor unitário',                         campo: 'valor_unitario', tipo: 'numero' },
+  { rotulo: 'Fornecedor (nome já cadastrado)',        campo: 'fornecedor_nome' },
+  { rotulo: 'Alugado (Sim/Não)',                      campo: 'alugado', tipo: 'booleano' },
+  { rotulo: 'Valor do aluguel',                       campo: 'valor_aluguel', tipo: 'numero' },
+  { rotulo: 'Período do aluguel',                     campo: 'aluguel_periodo' },
+  { rotulo: 'Vencimento do aluguel (AAAA-MM-DD)',     campo: 'aluguel_vencimento', tipo: 'data' },
+]
+
 const CAMPOS_IMPORTACAO: { rotulo: string; campo: string; tipo?: 'data' | 'numero' | 'booleano' | 'cpf' }[] = [
   { rotulo: 'Nome completo',                    campo: 'nome' },
   { rotulo: 'Código (matrícula e-Social)',      campo: 'matricula_esocial' },
@@ -147,13 +164,12 @@ export function registerImportacaoIpc() {
     let atualizados = 0
     let ignorados = 0
 
-    const buscarPorCpf = db.prepare(
-      `SELECT id FROM colaboradores WHERE empresa_id = ? AND cpf = ? AND cpf IS NOT NULL AND cpf != ''`
-    )
-
-    for (const linha of linhas) {
-      // Monta o objeto só com os campos que têm valor preenchido —
-      // campos em branco na planilha são simplesmente ignorados.
+    // Monta o objeto só com os campos que têm valor preenchido —
+    // campos em branco na planilha são simplesmente ignorados.
+    // ALTERADO: extraída pra função própria (antes ficava direto
+    // dentro do loop do SQLite) pra poder ser reaproveitada também
+    // no ramo do Supabase, sem duplicar a lógica de conversão.
+    function converterLinhaColaborador(linha: Record<string, unknown>): Record<string, unknown> {
       const dados: Record<string, unknown> = {}
       for (const { rotulo, campo, tipo } of CAMPOS_IMPORTACAO) {
         const bruto = linha[rotulo]
@@ -194,7 +210,57 @@ export function registerImportacaoIpc() {
           dados[campo] = String(bruto).trim()
         }
       }
+      return dados
+    }
 
+    // NOVO: faltava inteiramente o ramo do Supabase — a importação
+    // de colaboradores só gravava no SQLite local, nunca no banco de
+    // verdade usado em produção. Por isso a mensagem de sucesso
+    // aparecia ("X novo(s)"), mas nada era encontrado depois: os
+    // dados foram parar num banco local que ninguém lê.
+    if (getDatabaseProvider() === 'supabase') {
+      const s = getSupabase()
+      const { data: existentesRows, error } = await s.from('colaboradores')
+        .select('id,cpf,data_admissao').eq('empresa_id', p.empresa_id)
+      if (error) throw new Error(error.message)
+      const porCpf = new Map((existentesRows ?? []).filter(r => r.cpf).map(r => [r.cpf as string, r]))
+
+      for (const linha of linhas) {
+        const dados = converterLinhaColaborador(linha)
+        if (!dados.nome) { ignorados++; continue }
+
+        const existente = typeof dados.cpf === 'string' ? porCpf.get(dados.cpf) : undefined
+
+        if (dados.dias_experiencia !== undefined) {
+          const admissaoParaCalculo = typeof dados.data_admissao === 'string'
+            ? dados.data_admissao
+            : existente?.data_admissao ?? undefined
+          if (admissaoParaCalculo) {
+            const vencimento = calcularVencimentoExperiencia(admissaoParaCalculo, Number(dados.dias_experiencia))
+            if (vencimento) dados.data_vencimento_experiencia = vencimento
+          }
+        }
+
+        if (existente) {
+          const { error: e2 } = await s.from('colaboradores').update(dados).eq('id', existente.id)
+          if (e2) throw new Error(e2.message)
+          atualizados++
+        } else {
+          const { error: e2 } = await s.from('colaboradores').insert({ ...dados, empresa_id: p.empresa_id })
+          if (e2) throw new Error(e2.message)
+          criados++
+        }
+      }
+
+      return { ok: true, criados, atualizados, ignorados, total: linhas.length }
+    }
+
+    const buscarPorCpf = db.prepare(
+      `SELECT id FROM colaboradores WHERE empresa_id = ? AND cpf = ? AND cpf IS NOT NULL AND cpf != ''`
+    )
+
+    for (const linha of linhas) {
+      const dados = converterLinhaColaborador(linha)
       if (!dados.nome) { ignorados++; continue }
 
       const existente = dados.cpf
@@ -229,6 +295,172 @@ export function registerImportacaoIpc() {
         const binds   = colunas.map(c => `@${c}`).join(', ')
         db.prepare(`INSERT INTO colaboradores (${colunas.join(', ')}) VALUES (${binds})`)
           .run({ ...dados, empresa_id: p.empresa_id })
+        criados++
+      }
+    }
+
+    return { ok: true, criados, atualizados, ignorados, total: linhas.length }
+  })
+
+  // ── Produtos (Almoxarifado): gerar modelo em branco ─────
+  ipcMain.handle('importacao:gerarModeloProdutos', async () => {
+    const win = BrowserWindow.getFocusedWindow()
+    const opcoesDialogo: SaveDialogOptions = {
+      title:        'Salvar modelo de importação',
+      defaultPath:  'Modelo_Importacao_Produtos.xlsx',
+      filters:      [{ name: 'Excel', extensions: ['xlsx'] }],
+    }
+    const { filePath, canceled } = win
+      ? await dialog.showSaveDialog(win, opcoesDialogo)
+      : await dialog.showSaveDialog(opcoesDialogo)
+    if (canceled || !filePath) return { ok: false }
+
+    const cabecalho = CAMPOS_IMPORTACAO_PRODUTOS.map(c => c.rotulo)
+    const linhaExemplo = CAMPOS_IMPORTACAO_PRODUTOS.map(c => {
+      if (c.campo === 'nome') return 'CAPACETE DE SEGURANÇA (exemplo — apague esta linha)'
+      if (c.campo === 'unidade') return 'UN'
+      if (c.campo === 'alugado') return 'Não'
+      return ''
+    })
+
+    const ws = XLSX.utils.aoa_to_sheet([cabecalho, linhaExemplo])
+    ws['!cols'] = cabecalho.map(h => ({ wch: Math.max(18, h.length) }))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Produtos')
+    XLSX.writeFile(wb, filePath)
+
+    return { ok: true, filePath }
+  })
+
+  // ── Produtos (Almoxarifado): importar planilha preenchida ─
+  // NOVO: mesmo espírito da importação de colaboradores — o código
+  // (que normalmente é gerado sozinho ao cadastrar um por vez, ver
+  // produtos:proximoCodigo) também é gerado automaticamente aqui,
+  // sequencialmente, pra manter o padrão — a planilha não pede
+  // código nenhum. "Fornecedor" tenta casar pelo nome com um
+  // fornecedor já cadastrado (não cria fornecedor novo); se não
+  // achar, o material fica sem fornecedor vinculado.
+  ipcMain.handle('importacao:importarProdutos', async (_e, p: { empresa_id: number }) => {
+    const win = BrowserWindow.getFocusedWindow()
+    const opcoesDialogo: OpenDialogOptions = {
+      title:       'Selecionar planilha de produtos',
+      filters:     [{ name: 'Excel', extensions: ['xlsx', 'xls'] }],
+      properties:  ['openFile'],
+    }
+    const { filePaths, canceled } = win
+      ? await dialog.showOpenDialog(win, opcoesDialogo)
+      : await dialog.showOpenDialog(opcoesDialogo)
+    if (canceled || filePaths.length === 0) return { ok: false, canceled: true }
+
+    const wb = XLSX.readFile(filePaths[0], { cellDates: true })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const linhas = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' })
+
+    let criados = 0
+    let atualizados = 0
+    let ignorados = 0
+
+    function converterLinha(linha: Record<string, unknown>): Record<string, unknown> {
+      const dados: Record<string, unknown> = {}
+      for (const { rotulo, campo, tipo } of CAMPOS_IMPORTACAO_PRODUTOS) {
+        const bruto = linha[rotulo]
+        if (bruto === undefined || bruto === null || String(bruto).trim() === '') continue
+
+        if (tipo === 'booleano') {
+          const v = String(bruto).trim().toLowerCase()
+          dados[campo] = v === 'sim' || v === '1' || v === 'true' ? 1 : 0
+        } else if (tipo === 'numero') {
+          const n = Number(String(bruto).replace(',', '.'))
+          if (!Number.isNaN(n)) dados[campo] = n
+        } else if (tipo === 'data') {
+          if (bruto instanceof Date) {
+            dados[campo] = bruto.toISOString().slice(0, 10)
+          } else {
+            const texto = String(bruto).trim()
+            const br = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(texto)
+            dados[campo] = br ? `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}` : texto
+          }
+        } else {
+          dados[campo] = String(bruto).trim()
+        }
+      }
+      return dados
+    }
+
+    if (getDatabaseProvider() === 'supabase') {
+      const s = getSupabase()
+      const [{ data: existentesRows, error: e1 }, { data: fornecedoresRows, error: e2 }, { data: produtosAtuais, error: e3 }] = await Promise.all([
+        s.from('produtos').select('id,nome').eq('empresa_id', p.empresa_id),
+        s.from('fornecedores').select('id,nome').eq('empresa_id', p.empresa_id),
+        s.from('produtos').select('codigo').eq('empresa_id', p.empresa_id),
+      ])
+      if (e1) throw new Error(e1.message)
+      if (e2) throw new Error(e2.message)
+      if (e3) throw new Error(e3.message)
+
+      const porNome = new Map((existentesRows ?? []).map(r => [r.nome.toUpperCase(), r.id]))
+      const fornecedorPorNome = new Map((fornecedoresRows ?? []).map(f => [f.nome.toUpperCase(), f.id]))
+      let proximoCodigo = Math.max(0, ...(produtosAtuais ?? []).map(pr => Number(pr.codigo.replace(/\D/g, '')) || 0)) + 1
+
+      for (const linha of linhas) {
+        const dados = converterLinha(linha)
+        if (!dados.nome) { ignorados++; continue }
+
+        if (dados.fornecedor_nome) {
+          const idFornecedor = fornecedorPorNome.get(String(dados.fornecedor_nome).toUpperCase())
+          dados.fornecedor_id = idFornecedor ?? null
+        }
+        delete dados.fornecedor_nome
+
+        const existenteId = porNome.get(String(dados.nome).toUpperCase())
+        if (existenteId) {
+          const { error } = await s.from('produtos').update(dados).eq('id', existenteId)
+          if (error) throw new Error(error.message)
+          atualizados++
+        } else {
+          const codigo = String(proximoCodigo++).padStart(3, '0')
+          const { error } = await s.from('produtos').insert({ ...dados, empresa_id: p.empresa_id, codigo })
+          if (error) throw new Error(error.message)
+          criados++
+        }
+      }
+
+      return { ok: true, criados, atualizados, ignorados, total: linhas.length }
+    }
+
+    const buscarPorNome = db.prepare(
+      `SELECT id FROM produtos WHERE empresa_id = ? AND UPPER(nome) = UPPER(?)`
+    )
+    const buscarFornecedorPorNome = db.prepare(
+      `SELECT id FROM fornecedores WHERE empresa_id = ? AND UPPER(nome) = UPPER(?)`
+    )
+    let proximoCodigo = ((db.prepare(
+      `SELECT codigo FROM produtos WHERE empresa_id = ? ORDER BY CAST(codigo AS INTEGER) DESC LIMIT 1`
+    ).get(p.empresa_id) as { codigo: string } | undefined)?.codigo ?? '0')
+    let proximoCodigoNum = (Number(String(proximoCodigo).replace(/\D/g, '')) || 0) + 1
+
+    for (const linha of linhas) {
+      const dados = converterLinha(linha)
+      if (!dados.nome) { ignorados++; continue }
+
+      if (dados.fornecedor_nome) {
+        const fornecedor = buscarFornecedorPorNome.get(p.empresa_id, String(dados.fornecedor_nome)) as { id: number } | undefined
+        dados.fornecedor_id = fornecedor?.id ?? null
+      }
+      delete dados.fornecedor_nome
+
+      const existente = buscarPorNome.get(p.empresa_id, String(dados.nome)) as { id: number } | undefined
+
+      if (existente) {
+        const sets = Object.keys(dados).map(c => `${c} = @${c}`).join(', ')
+        db.prepare(`UPDATE produtos SET ${sets} WHERE id = @id`).run({ ...dados, id: existente.id })
+        atualizados++
+      } else {
+        const codigo = String(proximoCodigoNum++).padStart(3, '0')
+        const colunas = ['empresa_id', 'codigo', ...Object.keys(dados)]
+        const binds   = colunas.map(c => `@${c}`).join(', ')
+        db.prepare(`INSERT INTO produtos (${colunas.join(', ')}) VALUES (${binds})`)
+          .run({ ...dados, empresa_id: p.empresa_id, codigo })
         criados++
       }
     }

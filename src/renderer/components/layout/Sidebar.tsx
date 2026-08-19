@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore }    from '@store/auth.store'
 import { useEmpresaStore } from '@store/empresa.store'
+import { useUIStore }      from '@store/ui.store'
 import { useConfirm }      from '@hooks/useConfirm'
 import ConfirmDialog       from '@components/ui/ConfirmDialog'
 import { clsx }            from 'clsx'
@@ -23,13 +24,22 @@ import {
   RefreshCw,
   Building2,
   ChevronDown,
+  ChevronsLeft,
+  ChevronsRight,
   UsersRound,
   Landmark,
+  HelpCircle,
   PackageSearch,
   PackagePlus,
   PackageMinus,
   Boxes,
-  DatabaseBackup,
+  Building,
+  FolderTree,
+  TrendingUp,
+  CreditCard,
+  NotebookPen,
+  Calculator,
+  FileSpreadsheet,
 } from 'lucide-react'
 
 type Perfil = 'admin' | 'gestor' | 'almoxarife' | 'supervisor' | 'central' | 'master' | 'setor_pessoal'
@@ -65,6 +75,11 @@ interface MenuGroup {
 // Fiscais (leitura/impressão, controlado dentro da própria página);
 // ALMOXARIFADO só o grupo Almoxarifado (nem Início).
 const ITEM_INICIO: MenuItem = { to: '/inicio', icon: LayoutDashboard, label: 'Início', perfis: ['admin', 'gestor'], chave: 'inicio' }
+// NOVO: Faturas virou item independente (não fica dentro de nenhum
+// grupo que precisa expandir) — fica ancorado perto do rodapé, junto
+// do nome do usuário, sempre visível, porque tem notificação de
+// vencimento nele (precisa aparecer sem precisar clicar em nada).
+const ITEM_FATURAS: MenuItem = { to: '/faturas', icon: CreditCard, label: 'Faturas', perfis: ['admin'], chave: 'faturas' }
 const ITEM_SUPERVISOR_INICIO: MenuItem = { to: '/supervisor', icon: Building2, label: 'Painel Supervisor', perfis: ['supervisor'] }
 const ITEM_SUPERVISOR_RELATORIOS: MenuItem = { to: '/supervisor/relatorios', icon: ClipboardList, label: 'Relatórios', perfis: ['supervisor'] }
 const ITEM_SUPERVISOR_CONFIG: MenuItem = { to: '/supervisor/configuracoes', icon: Settings, label: 'Configurações', perfis: ['supervisor'] }
@@ -81,6 +96,10 @@ const GRUPOS: MenuGroup[] = [
       { to: '/colaboradores', icon: HardHat,       label: 'Colaboradores', perfis: ['admin'], chave: 'colaboradores' },
       { to: '/relatorios-rh', icon: ClipboardList, label: 'Relatórios RH', perfis: ['admin'], chave: 'relatorios-rh' },
       { to: '/solicitacoes-pessoal', icon: FileSignature, label: 'Solicitações ao Setor Pessoal', perfis: ['admin'], chave: 'solicitacoes-pessoal' },
+      // NOVO: painel parecido com a planilha Excel já usada hoje pra
+      // preencher a folha de pagamento, com exportação no formato que
+      // o programa de folha da empresa já sabe importar.
+      { to: '/folha-pagamento', icon: FileSpreadsheet, label: 'Folha de Pagamento', perfis: ['admin'], chave: 'folha-pagamento' },
     ],
   },
   {
@@ -108,28 +127,75 @@ const GRUPOS: MenuGroup[] = [
       { to: '/almoxarifado/entradas', icon: PackagePlus,  label: 'Entradas', perfis: ['admin', 'almoxarife'], chave: 'almoxarifado-entradas' },
       { to: '/almoxarifado/saidas',   icon: PackageMinus, label: 'Saídas', perfis: ['admin', 'almoxarife'], chave: 'almoxarifado-saidas' },
       { to: '/almoxarifado/estoque',  icon: PackageSearch, label: 'Estoque', perfis: ['admin', 'almoxarife', 'gestor'], chave: 'almoxarifado-estoque' },
+      // NOVO: ainda não existem — ficam visíveis, mas desabilitadas,
+      // até serem construídas de verdade. Perfis por enquanto iguais
+      // ao resto do Almoxarifado — ajustar quando ganharem função.
+      { to: '/almoxarifado/pedidos',    icon: ClipboardList, label: 'Pedidos',    perfis: ['admin', 'almoxarife'], emBreve: true },
+      { to: '/almoxarifado/orcamentos', icon: Calculator,    label: 'Orçamentos', perfis: ['admin', 'almoxarife'], emBreve: true },
+    ],
+  },
+  // NOVO: grupo novo, logo abaixo de Almoxarifado — por enquanto só
+  // tem o Diário de Obra, ainda por construir.
+  // ALTERADO: grupo "Obra" ganhou o primeiro item de verdade —
+  // Estrutura da Obra (EAP), onde o ADM monta as Fases/Itens/
+  // Sub-itens do processo construtivo. Diário de Obra continua "em
+  // breve" (é o próximo passo, depende da EAP já existir).
+  {
+    id:    'obra',
+    label: 'Obra',
+    icon:  Building,
+    itens: [
+      { to: '/obra/estrutura', icon: FolderTree, label: 'Estrutura da Obra (EAP)', perfis: ['gestor'], chave: 'obra-estrutura' },
+      { to: '/obra/diario', icon: NotebookPen, label: 'Diário de Obra', perfis: ['gestor'], chave: 'obra-diario' },
+      { to: '/obra/painel', icon: TrendingUp, label: 'Painel de Acompanhamento', perfis: ['admin', 'gestor'], chave: 'obra-painel' },
     ],
   },
 ]
 
-// ALTERADO: "Usuários" e "Configurações" (as telas antigas, presas a
-// uma única obra) saíram do menu — ficaram redundantes depois que o
-// Painel Administrador passou a cobrir as duas coisas (cadastro de
-// usuário por obra, e edição completa dos dados da obra), já do
-// jeito certo pra quem administra várias obras ao mesmo tempo.
-const MENU_BOTTOM: MenuItem[] = [
-  { to: '/configuracoes', icon: Settings, label: 'Configurações', perfis: ['admin', 'gestor'] },
-  { to: '/backup', icon: DatabaseBackup, label: 'Backup', perfis: ['admin', 'master'], chave: 'backup' },
-]
+// ALTERADO: "Configurações" saiu daqui e foi pro menu do usuário
+// (clicar no nome/avatar no rodapé), junto de Suporte/Trocar de
+// obra/Sair — como o menu do usuário no Claude.ai, por exemplo.
+// "Backup" saiu de vez daqui também — agora vive dentro da própria
+// tela de Configurações, como mais uma categoria.
 
 export default function Sidebar() {
   const usuario  = useAuthStore(s => s.usuario)
   const logout   = useAuthStore(s => s.logout)
+  const navigate = useNavigate()
+  // NOVO: menu suspenso do usuário — abre pra cima (o gatilho fica no
+  // rodapé), agrupando Configurações/Suporte/Trocar de obra/Sair, que
+  // antes ficavam espalhados soltos na barra.
+  const [menuUsuarioAberto, setMenuUsuarioAberto] = useState(false)
   const obrasDisponiveis = useAuthStore(s => s.obrasDisponiveis)
   const trocarObra = useAuthStore(s => s.trocarObra)
   const empresa  = useEmpresaStore(s => s.empresa)
   const { pathname } = useLocation()
   const { confirm, dialogProps } = useConfirm()
+
+  // NOVO: barra lateral recolhível — fica só com os ícones, liberando
+  // espaço horizontal pras telas com tabela larga (ex: Autorização de
+  // Pagamento). Lembra a preferência entre sessões.
+  const sidebarOpen   = useUIStore(s => s.sidebarOpen)
+  const toggleSidebar = useUIStore(s => s.toggleSidebar)
+  const setSidebar     = useUIStore(s => s.setSidebar)
+  // NOVO: quando a barra está recolhida (preferência salva), passar o
+  // mouse por cima expande ela temporariamente — tirar o mouse recolhe
+  // de novo. Não mexe na preferência salva (sidebarOpen continua
+  // recolhida) — é só uma expansão visual passageira. Se a preferência
+  // já é "aberta", isso não faz nada (já está expandida mesmo).
+  const [expandidaPorHover, setExpandidaPorHover] = useState(false)
+  const colapsada = !sidebarOpen && !expandidaPorHover
+
+  useEffect(() => {
+    const salvo = localStorage.getItem('sidebar-aberta')
+    if (salvo !== null) setSidebar(salvo === 'true')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function alternarSidebar() {
+    toggleSidebar()
+    localStorage.setItem('sidebar-aberta', String(!sidebarOpen))
+  }
 
   // NOVO: antes saía direto ao clicar — agora pede confirmação, pra
   // não sair da conta sem querer com um clique errado.
@@ -145,6 +211,25 @@ export default function Sidebar() {
   const perfil  = usuario?.perfil
   const extras  = usuario?.permissoes_extras ?? []
   const negadas = usuario?.permissoes_negadas ?? []
+
+  // NOVO: selo de notificação do item Faturas — conta quantas estão
+  // em aberto, e destaca com cor diferente se alguma já venceu ou
+  // vence hoje (mais urgente que só "disponível").
+  const [faturasAbertas, setFaturasAbertas] = useState<{ vencimento: string }[]>([])
+  useEffect(() => {
+    if (perfil !== 'admin' || !empresa?.id) { setFaturasAbertas([]); return }
+    window.api.faturas.listar(empresa.id)
+      .then((lista: { status: string; vencimento: string }[]) => {
+        setFaturasAbertas(lista.filter(f => f.status === 'aberta'))
+      })
+      .catch(() => setFaturasAbertas([]))
+  }, [perfil, empresa?.id])
+
+  const hojeISO = new Date().toISOString().slice(0, 10)
+  const faturasVencidas  = faturasAbertas.filter(f => f.vencimento.slice(0, 10) < hojeISO)
+  const faturasVenceHoje = faturasAbertas.filter(f => f.vencimento.slice(0, 10) === hojeISO)
+  const corSeloFaturas: 'red' | 'amber' | 'blue' | null =
+    faturasVencidas.length > 0 ? 'red' : faturasVenceHoje.length > 0 ? 'amber' : faturasAbertas.length > 0 ? 'blue' : null
 
   // ALTERADO: um item negado (Acessos extras, desmarcado mesmo sendo
   // do perfil por padrão) some do menu — sem isso, o link continuava
@@ -214,23 +299,38 @@ export default function Sidebar() {
     )
   }
 
-  function renderItemTopo(item: MenuItem) {
+  function renderItemTopo(item: MenuItem, selo?: { texto: string; cor: 'red' | 'amber' | 'blue' } | null) {
     if (!podeVer(item)) return null
     const Icon = item.icon
+    const coresSelo = {
+      red:   'bg-red-500 text-white',
+      amber: 'bg-amber-500 text-white',
+      blue:  'bg-brand-500 text-white',
+    }
     return (
       <NavLink
         key={item.to}
         to={item.to}
+        title={colapsada ? item.label : undefined}
         className={({ isActive }) => clsx(
-          'flex items-center gap-3 px-3 py-2.5 rounded-xl',
+          'flex items-center gap-3 px-3 py-2.5 rounded-xl relative',
           'text-sm font-semibold transition-colors',
+          colapsada && 'justify-center px-0',
           isActive
             ? 'bg-brand-600 text-white shadow-glow-sm'
             : 'text-white hover:bg-surface-hover'
         )}
       >
-        <Icon size={16} />
-        {item.label}
+        <Icon size={16} className="shrink-0" />
+        {!colapsada && item.label}
+        {!colapsada && selo && (
+          <span className={clsx('ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full', coresSelo[selo.cor])}>
+            {selo.texto}
+          </span>
+        )}
+        {colapsada && selo && (
+          <span className={clsx('absolute top-1 right-1 w-2 h-2 rounded-full', coresSelo[selo.cor].split(' ')[0])} />
+        )}
       </NavLink>
     )
   }
@@ -242,6 +342,25 @@ export default function Sidebar() {
     const Icon    = grupo.icon
     const aberto  = abertos.has(grupo.id)
     const temAtiva = grupo.itens.some(i => pathname.startsWith(i.to))
+
+    // NOVO: recolhida, um grupo não tem como mostrar os subitens
+    // (não cabe) — clicar no ícone reabre a barra inteira já com esse
+    // grupo expandido, em vez de tentar caber uma lista ali.
+    if (colapsada) {
+      return (
+        <button
+          key={grupo.id}
+          title={grupo.label}
+          onClick={() => { alternarSidebar(); if (!aberto) alternar(grupo.id) }}
+          className={clsx(
+            'w-full flex items-center justify-center py-2.5 rounded-xl',
+            temAtiva ? 'text-white bg-surface-hover' : 'text-gray-300 hover:bg-surface-hover hover:text-white'
+          )}
+        >
+          <Icon size={16} />
+        </button>
+      )
+    }
 
     return (
       <div key={grupo.id}>
@@ -270,24 +389,48 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-60 shrink-0 h-screen flex flex-col
-                      bg-surface border-r border-surface-border
-                      px-3 py-4">
+    <aside
+      onMouseEnter={() => !sidebarOpen && setExpandidaPorHover(true)}
+      onMouseLeave={() => setExpandidaPorHover(false)}
+      className={clsx(
+        'shrink-0 h-screen flex flex-col relative',
+        'bg-surface border-r border-surface-border',
+        'py-4 transition-all duration-200',
+        colapsada ? 'w-[68px] px-2' : 'w-60 px-3'
+      )}
+    >
+
+      {/* Botão de recolher/expandir — fica preso na borda direita da
+          barra, meio caminho da altura, do jeito que a maioria dos
+          programas com esse recurso já deixa. */}
+      <button
+        onClick={alternarSidebar}
+        title={colapsada ? 'Expandir menu' : 'Recolher menu'}
+        className="absolute -right-3 top-16 z-10 w-6 h-6 rounded-full
+                   bg-surface border border-surface-border
+                   flex items-center justify-center
+                   text-gray-400 hover:text-white hover:bg-surface-hover
+                   transition-colors"
+      >
+        {colapsada ? <ChevronsRight size={12} /> : <ChevronsLeft size={12} />}
+      </button>
 
       {/* Logo + empresa */}
-      <div className="flex items-center gap-2.5 px-2 mb-6">
+      <div className={clsx('flex items-center gap-2.5 mb-6', colapsada ? 'px-0 justify-center' : 'px-2')}>
         <div className="w-8 h-8 rounded-lg bg-brand-500
                         flex items-center justify-center shrink-0">
           <Building2 size={15} className="text-white" />
         </div>
-        <div className="min-w-0">
-          <p className="text-xs font-bold text-gray-100 truncate leading-tight">
-            ADM PRO
-          </p>
-          <p className="text-[11px] text-gray-500 truncate leading-tight">
-            {empresa?.nome ?? '—'}
-          </p>
-        </div>
+        {!colapsada && (
+          <div className="min-w-0">
+            <p className="text-xs font-bold text-gray-100 truncate leading-tight">
+              ADM OBRA
+            </p>
+            <p className="text-[11px] text-gray-500 truncate leading-tight">
+              {empresa?.nome ?? '—'}
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Menu principal */}
@@ -303,50 +446,98 @@ export default function Sidebar() {
         <div className="my-2 border-t border-surface-border" />
 
         {GRUPOS.map(renderGrupo)}
-
-        <div className="my-2 border-t border-surface-border" />
-
-        {MENU_BOTTOM.map(renderItemTopo)}
       </nav>
 
-      {/* Usuário logado + logout */}
-      <div className="mt-4 pt-4 border-t border-surface-border">
-        <div className="flex items-center gap-2.5 px-2 mb-2">
+      {/* NOVO: Faturas fica fora da área que rola (nav acima) e antes
+          do rodapé — ancorada, sempre visível, com selo de
+          notificação (vermelho = vencida, amarelo = vence hoje, azul
+          = só em aberto). */}
+      <div className="mt-1">
+        {renderItemTopo(
+          ITEM_FATURAS,
+          corSeloFaturas ? { texto: String(faturasAbertas.length), cor: corSeloFaturas } : null
+        )}
+      </div>
+
+      {/* Usuário logado — clicar abre o menu suspenso (Configurações,
+          Suporte, Trocar de obra, Sair), que fica aberto por cima do
+          rodapé — mesmo padrão do menu de usuário do Claude.ai. */}
+      <div className="relative mt-4 pt-4 border-t border-surface-border">
+        {menuUsuarioAberto && (
+          <>
+            {/* Fundo invisível — clicar fora fecha o menu */}
+            <div className="fixed inset-0 z-40" onClick={() => setMenuUsuarioAberto(false)} />
+
+            <div className="absolute z-50 bottom-full left-2 right-2 mb-2
+                             bg-surface-card border border-surface-border rounded-xl
+                             shadow-2xl overflow-hidden py-1.5">
+              <p className="px-3 py-2 text-xs text-gray-500 truncate">{usuario?.email}</p>
+              <div className="border-t border-surface-border" />
+
+              {(perfil === 'admin' || perfil === 'gestor' || perfil === 'master') && (
+                <button
+                  onClick={() => { setMenuUsuarioAberto(false); navigate('/configuracoes') }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-200 hover:bg-surface-hover transition-colors"
+                >
+                  <Settings size={14} className="shrink-0" /> Configurações
+                </button>
+              )}
+
+              {/* NOVO: Suporte ainda não existe de verdade — fica
+                  visível já no lugar certo, marcado "em breve", até a
+                  gente construir o que vai ter ali. */}
+              <button
+                disabled
+                className="w-full flex items-center justify-between gap-2.5 px-3 py-2 text-sm text-gray-600 cursor-not-allowed"
+              >
+                <span className="flex items-center gap-2.5"><HelpCircle size={14} className="shrink-0" /> Suporte</span>
+                <span className="text-[10px] text-gray-600">em breve</span>
+              </button>
+
+              {obrasDisponiveis.length > 1 && (
+                <button
+                  onClick={() => { setMenuUsuarioAberto(false); trocarObra() }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-200 hover:bg-surface-hover transition-colors"
+                >
+                  <RefreshCw size={14} className="shrink-0" /> Trocar de obra
+                </button>
+              )}
+
+              <div className="border-t border-surface-border" />
+
+              <button
+                onClick={() => { setMenuUsuarioAberto(false); handleSair() }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+              >
+                <LogOut size={14} className="shrink-0" /> Sair
+              </button>
+            </div>
+          </>
+        )}
+
+        <button
+          onClick={() => setMenuUsuarioAberto(v => !v)}
+          className={clsx(
+            'w-full flex items-center gap-2.5 py-1.5 rounded-lg hover:bg-surface-hover transition-colors',
+            colapsada ? 'justify-center px-0' : 'px-2'
+          )}
+        >
           <div className="w-7 h-7 rounded-full bg-brand-500/10
                           flex items-center justify-center shrink-0
                           text-xs font-bold text-brand-400 uppercase">
             {usuario?.nome?.slice(0, 2) ?? '??'}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium text-gray-200 truncate">
-              {usuario?.nome}
-            </p>
-            <p className="text-[11px] text-gray-500 truncate">
-              {PERFIL_LABEL[perfil ?? 'gestor']}
-            </p>
-          </div>
-          <button
-            onClick={handleSair}
-            title="Sair"
-            className="p-1.5 rounded-lg text-gray-500
-                       hover:text-red-400 hover:bg-red-500/10
-                       transition-colors"
-          >
-            <LogOut size={13} />
-          </button>
-        </div>
-
-        {/* NOVO: só aparece pra quem administra mais de uma obra */}
-        {obrasDisponiveis.length > 1 && (
-          <button
-            onClick={trocarObra}
-            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg
-                       text-xs text-gray-400 hover:text-brand-400 hover:bg-surface-hover
-                       transition-colors"
-          >
-            <RefreshCw size={12} /> Trocar de obra
-          </button>
-        )}
+          {!colapsada && (
+            <div className="min-w-0 flex-1 text-left">
+              <p className="text-xs font-medium text-gray-200 truncate">
+                {usuario?.nome}
+              </p>
+              <p className="text-[11px] text-gray-500 truncate">
+                {PERFIL_LABEL[perfil ?? 'gestor']}
+              </p>
+            </div>
+          )}
+        </button>
       </div>
 
       <ConfirmDialog {...dialogProps} />

@@ -10,6 +10,7 @@ import {
   Calendar,
 } from 'lucide-react'
 import Button from '@components/ui/Button'
+import { calcularResumoFolha } from '@utils/folhaPagamentoCalculo'
 
 // ALTERADO: os cards de resumo financeiro (Receitas/Despesas/Saldo/A
 // receber), o gráfico de fluxo de caixa e o saldo por conta saíram
@@ -54,6 +55,10 @@ export default function Dashboard() {
   const [loadingRh, setLoadingRh] = useState(true)
   const [mes,       setMes]       = useState(MES_ATUAL)
   const [ano,       setAno]       = useState(ANO_ATUAL)
+  // NOVO: total aproximado da Folha de Pagamento SALVA pro mês/ano
+  // escolhido no filtro (null = nenhuma folha salva pra esse mês).
+  const [totalFolha,        setTotalFolha]        = useState<number | null>(null)
+  const [loadingTotalFolha, setLoadingTotalFolha]  = useState(true)
 
   // ── Buscar dados ─────────────────────────────────────────
   async function fetchDashboard() {
@@ -76,11 +81,15 @@ export default function Dashboard() {
   useEffect(() => { fetchDashboard() }, [empresaId, mes, ano])
 
   // ── Buscar dados de RH ────────────────────────────────────
+  // CORRIGIDO: não mandava o mês nenhum pro backend — os
+  // aniversariantes sempre vinham do mês REAL de hoje, ignorando
+  // qualquer mês escolhido no filtro. Também não reagia a mudança de
+  // mês/ano (useEffect só tinha empresaId nas dependências).
   async function fetchResumoRH() {
     if (!empresaId) return
     setLoadingRh(true)
     try {
-      const rh = await window.api.colaboradores.resumoRH(empresaId)
+      const rh = await window.api.colaboradores.resumoRH({ empresa_id: empresaId, mes })
       setRhData(rh)
     } catch {
       toast.error('Erro ao carregar resumo de RH.')
@@ -89,10 +98,33 @@ export default function Dashboard() {
     }
   }
 
-  useEffect(() => { fetchResumoRH() }, [empresaId])
+  useEffect(() => { fetchResumoRH() }, [empresaId, mes])
+
+  // NOVO: busca a Folha de Pagamento salva pro mês/ano escolhido, e
+  // calcula o total aproximado (mesma conta usada no editor da
+  // Folha) — mostrado no rodapé do card "Custo de Salários".
+  async function fetchTotalFolha() {
+    if (!empresaId) return
+    setLoadingTotalFolha(true)
+    try {
+      const mesCompetencia = `${ano}-${String(mes).padStart(2, '0')}`
+      const folha = await window.api.folhaPagamento.buscarPorCompetencia({
+        empresa_id: empresaId, mes_competencia: `${mesCompetencia}-01`,
+      })
+      if (!folha) { setTotalFolha(null); return }
+      setTotalFolha(calcularResumoFolha(folha.itens, mesCompetencia).totalGeral)
+    } catch (erro) {
+      console.error('Erro ao buscar o total da folha:', erro)
+      setTotalFolha(null)
+    } finally {
+      setLoadingTotalFolha(false)
+    }
+  }
+
+  useEffect(() => { fetchTotalFolha() }, [empresaId, mes, ano])
 
   async function handleAtualizar() {
-    await Promise.all([fetchDashboard(), fetchResumoRH()])
+    await Promise.all([fetchDashboard(), fetchResumoRH(), fetchTotalFolha()])
   }
 
   return (
@@ -146,7 +178,7 @@ export default function Dashboard() {
       </div>
 
       {/* Recursos Humanos */}
-      <ResumoRH data={rhData} loading={loadingRh} />
+      <ResumoRH data={rhData} loading={loadingRh} totalFolha={totalFolha} loadingTotalFolha={loadingTotalFolha} />
 
       {/* Financeiro */}
       <div className="flex items-center gap-2 mb-3">

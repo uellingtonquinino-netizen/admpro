@@ -44,6 +44,7 @@ interface FormData {
   dias_experiencia:              string
   data_vencimento_experiencia:   string
   status:                        string
+  data_demissao:                 string
   ctps:                          string
   ctps_serie:                    string
   pis:                           string
@@ -94,7 +95,7 @@ const EMPTY: FormData = {
   estado_civil: '', nacionalidade: 'Brasileira', nome_mae: '', nome_pai: '',
   escolaridade: '', pcd: false, funcao: '', setor: '', equipe: '',
   tipo_contrato: 'CLT', data_admissao: '', dias_experiencia: '45',
-  data_vencimento_experiencia: '', status: 'ativo', ctps: '', ctps_serie: '',
+  data_vencimento_experiencia: '', status: 'ativo', data_demissao: '', ctps: '', ctps_serie: '',
   pis: '', telefone: '', email: '', contato_emergencia_nome: '',
   contato_emergencia_telefone: '', endereco: '', numero: '', bairro: '',
   cidade: '', estado: '', cep: '', banco: '', agencia: '', operacao: '',
@@ -212,6 +213,14 @@ export default function ColaboradorModal({ open, onClose, onSaved, onRefresh, co
 
   function set<K extends keyof FormData>(key: K, value: FormData[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
+  }
+
+  // NOVO: preencher a Data de Demissão já marca o Status como
+  // Desligado sozinho — só nessa direção (limpar a data de propósito
+  // não desfaz o status, pra não reverter um desligamento por
+  // acidente só por apagar a data sem querer).
+  function setDataDemissao(valor: string) {
+    setForm(prev => ({ ...prev, data_demissao: valor, status: valor ? 'desligado' : prev.status }))
   }
 
   // NOVO: ao completar os 8 dígitos do CEP, busca o endereço
@@ -382,6 +391,12 @@ export default function ColaboradorModal({ open, onClose, onSaved, onRefresh, co
           ]} />
         <Input label="Salário base (R$)" value={form.salario_base} onChange={e => set('salario_base', formatMoeda(e.target.value))} placeholder="0,00" />
         <Input label="Data de admissão" type="date" value={form.data_admissao} onChange={e => set('data_admissao', e.target.value)} />
+        {/* NOVO: campo que faltava — sem ele, desligar um colaborador
+            (aqui ou pelo Comunicado de Dispensa) nunca gravava a
+            data, só o status. Digitar uma data aqui já marca o
+            status como Desligado sozinho, pra não esquecer de trocar
+            os dois campos por mão. */}
+        <Input label="Data de demissão" type="date" value={form.data_demissao} onChange={e => setDataDemissao(e.target.value)} />
         <Input label="Dias de experiência" type="number" value={form.dias_experiencia} onChange={e => set('dias_experiencia', e.target.value)} />
         <Input label="Vencimento da experiência" type="date" value={form.data_vencimento_experiencia} disabled
           title="Calculado automaticamente a partir da admissão e dos dias de experiência" />

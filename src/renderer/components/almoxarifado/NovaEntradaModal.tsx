@@ -56,6 +56,7 @@ export default function NovaEntradaModal({ onClose, onSaved }: Props) {
   const [indiceSugestoesAbertas, setIndiceSugestoesAbertas] = useState<number | null>(null)
 
   const [desconto, setDesconto] = useState('0')
+  const [acrescimo, setAcrescimo] = useState('0')
   const [salvando, setSalvando] = useState(false)
 
   useEffect(() => {
@@ -125,7 +126,8 @@ export default function NovaEntradaModal({ onClose, onSaved }: Props) {
     return soma + qtd * val
   }, 0)
   const descontoNum = Number(desconto.toString().replace(',', '.')) || 0
-  const total = Math.max(subtotal - descontoNum, 0)
+  const acrescimoNum = Number(acrescimo.toString().replace(',', '.')) || 0
+  const total = Math.max(subtotal - descontoNum + acrescimoNum, 0)
 
   async function handleSalvar() {
     if (!fornecedorSel) { toast.error('Selecione o fornecedor.'); return }
@@ -145,6 +147,7 @@ export default function NovaEntradaModal({ onClose, onSaved }: Props) {
         fornecedor_id:   fornecedorSel.id,
         fornecedor_nome: fornecedorSel.nome,
         valor_desconto:  descontoNum,
+        valor_acrescimo: acrescimoNum,
         itens: itens.map(it => ({
           produto_id:     it.produto_id!,
           produto_codigo: it.codigo.trim(),
@@ -275,8 +278,9 @@ export default function NovaEntradaModal({ onClose, onSaved }: Props) {
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 items-end border-t border-surface-border pt-4">
+        <div className="grid grid-cols-3 gap-4 items-end border-t border-surface-border pt-4">
           <Input label="Desconto (R$)" value={desconto} onChange={e => setDesconto(e.target.value)} placeholder="0,00" />
+          <Input label="Acréscimo (R$)" value={acrescimo} onChange={e => setAcrescimo(e.target.value)} placeholder="0,00" />
           <div className="text-right">
             <p className="text-sm text-gray-300">
               Valor total da entrada: <span className="text-lg font-semibold text-white">{format(total)}</span>

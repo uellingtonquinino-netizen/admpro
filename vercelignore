@@ -1,0 +1,18 @@
+# NOVO: sem isso, o `vercel --prod` tentava subir a pasta inteira do
+# projeto (mais de 500MB — node_modules, os instaladores .exe já
+# gerados, builds do Electron) e estourava o limite de 100MB por
+# arquivo. O Vercel só precisa do código-fonte (src/web) pra buildar
+# sozinho — o resto é lixo de build do lado Electron, que não tem
+# nada a ver com o site.
+node_modules
+dist
+dist-main
+dist-preload
+dist-electron
+release
+resources
+.git
+*.exe
+*.dmg
+*.AppImage
+*.blockmap

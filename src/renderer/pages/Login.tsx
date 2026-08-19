@@ -6,7 +6,7 @@ import Button             from '@components/ui/Button'
 import Input               from '@components/ui/Input'
 import { KeyRound } from 'lucide-react'
 
-type Etapa = 'login' | 'recuperar-pedir' | 'recuperar-confirmar'
+type Etapa = 'login' | 'recuperar-pedir' | 'recuperar-confirmar' | 'recuperar-link-enviado'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -14,7 +14,7 @@ export default function Login() {
 
   const [etapa, setEtapa] = useState<Etapa>('login')
 
-  const [email, setEmail]     = useState('')
+  const [email, setEmail]     = useState(() => localStorage.getItem('adm_obra_ultimo_email') ?? '')
   const [senha, setSenha]     = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -23,6 +23,8 @@ export default function Login() {
     setLoading(true)
     try {
       await login(email, senha)
+      // NOVO: lembra o último e-mail usado, pra próxima vez só pedir a senha.
+      localStorage.setItem('adm_obra_ultimo_email', email)
       navigate('/inicio')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Falha ao entrar.')
@@ -44,8 +46,18 @@ export default function Login() {
     try {
       const resultado = await window.api.auth.solicitarRecuperacaoSenha(emailRecuperacao.trim())
       if (!resultado.ok) { toast.error(resultado.erro || 'Não foi possível enviar o código.'); return }
-      toast.success('Código enviado — confira seu e-mail.')
-      setEtapa('recuperar-confirmar')
+      // NOVO: no desktop, esse pedido gera um código de 6 dígitos pra
+      // digitar aqui mesmo. No navegador, o Supabase manda um LINK
+      // por e-mail — não tem código pra confirmar nessa tela, a
+      // pessoa clica no link e cai direto na tela de nova senha.
+      // `confirmarRecuperacaoSenha` só existe no desktop — dá pra
+      // saber qual dos dois casos é esse só checando se ele existe.
+      if (window.api.auth.confirmarRecuperacaoSenha) {
+        toast.success('Código enviado — confira seu e-mail.')
+        setEtapa('recuperar-confirmar')
+      } else {
+        setEtapa('recuperar-link-enviado')
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro ao pedir o código.')
     } finally {
@@ -82,7 +94,10 @@ export default function Login() {
           onSubmit={handleSubmit}
           className="w-full max-w-sm bg-surface-card border border-surface-border rounded-xl p-8 space-y-4"
         >
-          <h1 className="text-xl font-bold text-center mb-2">ADM PRO</h1>
+          <h1 className="text-xl font-bold text-center mb-2 leading-tight">
+            <span className="block">ADM</span>
+            <span className="block">OBRA</span>
+          </h1>
 
           <Input
             label="E-mail"
@@ -96,6 +111,7 @@ export default function Login() {
             type="password"
             value={senha}
             onChange={e => setSenha(e.target.value)}
+            autoFocus={!!email}
             required
           />
 
@@ -177,6 +193,25 @@ export default function Login() {
             Não recebi o código — tentar de novo
           </button>
         </form>
+      )}
+      {etapa === 'recuperar-link-enviado' && (
+        <div className="w-full max-w-sm bg-surface-card border border-surface-border rounded-xl p-8 space-y-4 text-center">
+          <div className="flex items-center gap-2 justify-center mb-1">
+            <KeyRound size={18} className="text-brand-400" />
+            <h1 className="text-lg font-bold text-center">Confira seu e-mail</h1>
+          </div>
+          <p className="text-xs text-gray-400">
+            Mandamos um link pra <span className="text-gray-200">{emailRecuperacao}</span> — clica nele pra escolher sua nova senha.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => setEtapa('login')}
+            className="w-full text-center text-xs text-gray-400 hover:text-white transition-colors"
+          >
+            Voltar pro login
+          </button>
+        </div>
       )}
     </div>
   )

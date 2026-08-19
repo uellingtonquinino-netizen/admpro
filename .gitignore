@@ -11,3 +11,6 @@ release/
 supabase/.temp/
 supabase/imports/
 dist-electron/
+
+.vercel
+.env*

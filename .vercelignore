@@ -1,0 +1,13 @@
+﻿node_modules
+dist
+dist-main
+dist-preload
+dist-electron
+dist-web
+release
+resources
+.git
+*.exe
+*.dmg
+*.AppImage
+*.blockmap

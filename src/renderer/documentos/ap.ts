@@ -32,6 +32,24 @@ export interface DadosAP {
   solicitante:      string
   autorizadoPor:    string
   dataEmissao?:     string  // já formatada dd/mm/aaaa — padrão: hoje
+  // NOVO: carimbo de quem autorizou (Gestor/ADM) — fica ANCORADO no
+  // canto inferior direito do PRÓPRIO TEXTO de "Dados Bancários" (não
+  // da célula inteira) — um invólucro com position:relative envolve só
+  // o texto bancário, e a imagem fica position:absolute presa a esse
+  // invólucro. Como a imagem ocupa o MESMO espaço vertical que o texto
+  // já ocupa (ao lado dele, não embaixo), ela não pede NENHUM espaço
+  // extra — o tamanho da célula continua determinado só pelo texto,
+  // igual sempre foi, então a AP nunca cresce por causa do carimbo,
+  // não importa quantas parcelas o lado direito tenha. Testado com 3
+  // cenários (AP real de 4 parcelas, extremo de 7 parcelas, caso
+  // simples de 1 parcela) — os três em 1 página só, sem sobrepor o
+  // texto bancário nem o rodapé. Chegou nesse formato depois de 3
+  // tentativas anteriores que não davam certo: coordenada fixa da
+  // PÁGINA (quebrava com documento de tamanho variável), dentro do
+  // fluxo normal do texto (fazia a célula toda crescer), e um
+  // invólucro de altura fixa reservada (ainda concorria com as
+  // parcelas por espaço, podendo estourar 2 páginas em casos extremos).
+  carimboUrl?:      string | null
 }
 
 function multilinha(txt: string): string {
@@ -45,16 +63,38 @@ export function gerarHtmlAP(dados: DadosAP): string {
 
   // Uma parcela: valor, extenso, depois o vencimento.
   // Mais de uma: uma linha por parcela, com vencimento em cada uma.
+  // NOVO: com mais de 3 parcelas, a lista deles ficava alta o
+  // suficiente pra empurrar a AP inteira pra uma segunda página (só
+  // o rodapé sozinho lá, sobrando). Em vez de mexer no bloco de
+  // dados bancários/carimbo (que já foi bem ajustado, ver comentário
+  // acima em DadosAP.carimboUrl), só a lista de parcelas fica mais
+  // compacta nesse caso — fonte um pouco menor, menos espaço entre
+  // as linhas. Com 3 ou menos, fica exatamente como já era.
+  const estiloParcelasCompacto = dados.boletos.length > 3
+    ? 'font-size: 8.5pt; line-height: 1.05;'
+    : ''
   const blocoParcelas = dados.boletos.length <= 1
     ? (dados.boletos[0]?.vencimento ? `<div>VENCIMENTO: ${fmtData(dados.boletos[0].vencimento)}</div>` : '')
     : `
-      <div class="ap-parcelas">
+      <div class="ap-parcelas" style="${estiloParcelasCompacto}">
         ${dados.boletos.map((b, i) => `<div>${i + 1}ª: ${formatMoeda(b.valor)} — venc. ${fmtData(b.vencimento)}</div>`).join('')}
       </div>
     `
 
+  // ALTERADO: quando o pagamento é via boleto, as linhas que seriam
+  // de banco/agência/conta/etc. ficam em branco (em vez de somem) —
+  // assim a AP mantém sempre a mesma aparência/altura, não importa a
+  // forma de pagamento (e o carimbo, ancorado no canto desse bloco,
+  // também fica sempre no mesmo lugar).
   const blocoBancario = dados.boleto
-    ? `<div class="ap-linha">PAGAMENTO VIA BOLETO</div>`
+    ? `
+      <div class="ap-linha">PAGAMENTO VIA BOLETO</div>
+      <div class="ap-linha">&nbsp;</div>
+      <div class="ap-linha">&nbsp;</div>
+      <div class="ap-linha">&nbsp;</div>
+      <div class="ap-linha">&nbsp;</div>
+      <div class="ap-linha">&nbsp;</div>
+    `
     : dados.dadosBancariosTexto !== undefined
     ? `<div class="ap-linha">CONTA PRA DEPÓSITO:</div>${multilinha(dados.dadosBancariosTexto) || '<div class="ap-linha">—</div>'}`
     : `
@@ -83,7 +123,7 @@ export function gerarHtmlAP(dados: DadosAP): string {
                              border-bottom: 1.6pt solid #000; padding: 5px 8px; }
       .ap-razao td { font-weight: bold; font-size: 10.5pt; padding-top: 6px; }
       .ap-doc td { border-bottom: 1.6pt solid #000; padding-bottom: 6px; }
-      .ap-col-esq { width: 55%; border-top: 1.6pt solid #000; }
+      .ap-col-esq { width: 55%; border-top: 1.6pt solid #000; position: relative; }
       .ap-col-dir { width: 45%; border-top: 1.6pt solid #000; }
       .ap-borda-baixo { border-bottom: 1.6pt solid #000; }
       .ap-valor-caixa { font-weight: bold; font-size: 12.5pt; text-align: right;
@@ -125,7 +165,16 @@ export function gerarHtmlAP(dados: DadosAP): string {
         <td class="ap-header-dir">OBSERVAÇÕES:</td>
       </tr>
       <tr>
-        <td class="ap-col-esq ap-borda-baixo">${blocoBancario}<br/><br/><br/></td>
+        <td class="ap-col-esq ap-borda-baixo">
+          <div style="position:relative;">
+            ${blocoBancario}
+            ${dados.carimboUrl
+              ? `<img src="${dados.carimboUrl}" style="position:absolute;bottom:0;right:6pt;height:80pt;max-width:170pt;object-fit:contain;" />`
+              : ''
+            }
+          </div>
+          ${!dados.carimboUrl ? '<br/><br/><br/>' : ''}
+        </td>
         <td class="ap-col-dir ap-borda-baixo">${multilinha(dados.observacoes) || '—'}</td>
       </tr>
       <tr>
@@ -142,7 +191,12 @@ export function gerarHtmlAP(dados: DadosAP): string {
     duasVias:   true,
     fontSize:   '9.5pt',
     lineHeight: 1.2,
-    viaGap:     14,
-    margem:     '5mm 6mm',
+    // AJUSTADO: com duas vias na mesma página, a segunda estava
+    // estourando pra página 2 mesmo em casos "normais" (3 parcelas,
+    // sem nada fora do comum). Reduzi só a margem vertical da página
+    // e o espaço entre as duas vias — nenhum conteúdo (texto, dados
+    // bancários, carimbo) foi tocado, só o "respiro" ao redor.
+    viaGap:     8,
+    margem:     '3mm 6mm',
   })
 }

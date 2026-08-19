@@ -60,12 +60,29 @@ export function registerSupabaseUsuariosIpc() {
   }
   ipcMain.handle('usuarios:listar', async (_event, empresaId: number) => {
     const supabase = getSupabase()
-    const { data: usuarios, error } = await supabase
-      .from('usuarios')
-      .select('id,empresa_id,nome,email,perfil,ativo,created_at,last_login_at,carimbo_url')
-      .eq('empresa_id', empresaId)
-      .order('nome')
-    if (error) throw new Error(error.message)
+    // CORRIGIDO: só buscava quem tem essa obra como "casa"
+    // (empresa_id), nunca quem foi vinculado depois como obra EXTRA
+    // (usuario_obras) — vincular um usuário existente a mais uma obra
+    // nunca fazia ele aparecer na lista dessa obra.
+    const [{ data: usuariosCasa, error: erroCasa }, { data: vinculosExtras, error: erroVinculos }] = await Promise.all([
+      supabase.from('usuarios').select('id,empresa_id,nome,email,perfil,ativo,created_at,last_login_at,carimbo_url').eq('empresa_id', empresaId),
+      supabase.from('usuario_obras').select('usuario_id').eq('empresa_id', empresaId),
+    ])
+    if (erroCasa) throw new Error(erroCasa.message)
+    if (erroVinculos) throw new Error(erroVinculos.message)
+
+    const idsExtras = (vinculosExtras ?? []).map(v => v.usuario_id).filter(id => !(usuariosCasa ?? []).some(u => u.id === id))
+    let usuariosExtras: typeof usuariosCasa = []
+    if (idsExtras.length > 0) {
+      const { data, error } = await supabase
+        .from('usuarios')
+        .select('id,empresa_id,nome,email,perfil,ativo,created_at,last_login_at,carimbo_url')
+        .in('id', idsExtras)
+      if (error) throw new Error(error.message)
+      usuariosExtras = data
+    }
+
+    const usuarios = [...(usuariosCasa ?? []), ...usuariosExtras].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
     return Promise.all((usuarios ?? []).map(async usuario => {
       const [extras, supervisor, obras] = await Promise.all([
         supabase.from('usuario_permissoes_extras').select('chave,negada').eq('usuario_id', usuario.id),
@@ -77,6 +94,36 @@ export function registerSupabaseUsuariosIpc() {
       }
       return {
         ...usuario,
+        permissoes_extras: (extras.data ?? []).filter(x => !x.negada).map(x => x.chave),
+        permissoes_negadas: (extras.data ?? []).filter(x => !!x.negada).map(x => x.chave),
+        obras_supervisor: (supervisor.data ?? []).map(x => x.empresa_id),
+        obras_extras: (obras.data ?? []).map(x => x.empresa_id),
+      }
+    }))
+  })
+
+  // ── Listar TODOS os usuários, de todas as obras (Master) ──
+  // Mesma lógica do lado SQLite (usuarios.ipc.ts) — ver comentário lá.
+  ipcMain.handle('usuarios:listarTodos', async () => {
+    const supabase = getSupabase()
+    const { data: usuarios, error } = await supabase
+      .from('usuarios')
+      .select('id,empresa_id,nome,email,perfil,ativo,created_at,last_login_at,carimbo_url,empresas(nome)')
+      .order('nome')
+    if (error) throw new Error(error.message)
+    return Promise.all((usuarios ?? []).map(async usuario => {
+      const [extras, supervisor, obras] = await Promise.all([
+        supabase.from('usuario_permissoes_extras').select('chave,negada').eq('usuario_id', usuario.id),
+        supabase.from('supervisor_obras').select('empresa_id').eq('usuario_id', usuario.id),
+        supabase.from('usuario_obras').select('empresa_id').eq('usuario_id', usuario.id),
+      ])
+      for (const resultado of [extras, supervisor, obras]) {
+        if (resultado.error) throw new Error(resultado.error.message)
+      }
+      const { empresas, ...usuarioSemEmpresas } = usuario as typeof usuario & { empresas: { nome: string } | null }
+      return {
+        ...usuarioSemEmpresas,
+        empresa_nome: empresas?.nome ?? '—',
         permissoes_extras: (extras.data ?? []).filter(x => !x.negada).map(x => x.chave),
         permissoes_negadas: (extras.data ?? []).filter(x => !!x.negada).map(x => x.chave),
         obras_supervisor: (supervisor.data ?? []).map(x => x.empresa_id),
@@ -137,12 +184,30 @@ export function registerSupabaseUsuariosIpc() {
     return { ok: true }
   })
 
-  ipcMain.handle('usuarios:remover', async (_event, p: { id: number } | number) => chamarAdmin({ acao: 'remover', id: typeof p === 'number' ? p : p.id }))
+  ipcMain.handle('usuarios:remover', async (_event, p: { id: number } | number) => {
+    const id = typeof p === 'number' ? p : p.id
+    const supabase = getSupabase()
+    const { data: usuario } = await supabase.from('usuarios').select('nome,email,empresa_id').eq('id', id).single()
+    if (usuario) {
+      await supabase.rpc('registrar_exclusao', {
+        p_tabela: 'usuarios', p_registro_id: id,
+        p_descricao: `Usuário - ${usuario.nome} (${usuario.email})`,
+        p_empresa_id: usuario.empresa_id,
+      })
+    }
+    return chamarAdmin({ acao: 'remover', id })
+  })
 
   ipcMain.handle('usuarios:login', async (_event, p: LoginParams) => {
     const supabase = getSupabase()
     const { error } = await supabase.auth.signInWithPassword({ email: p.email.trim(), password: p.senha })
     if (error) throw new Error('Usuário ou senha inválidos.')
+    // CORRIGIDO: "último acesso" nunca era gravado no Supabase — nem
+    // existia esse UPDATE aqui antes. E um UPDATE direto na tabela
+    // teria sido barrado pela política (só o Master pode dar UPDATE
+    // em usuarios) — por isso uma função própria, que só grava a
+    // própria linha, nada mais.
+    await supabase.rpc('registrar_login')
     return getCurrentProfile()
   })
 

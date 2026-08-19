@@ -77,7 +77,7 @@ export default function Estoque() {
       ) : itens.length === 0 ? (
         <EmptyState icon={Boxes} title="Nenhum material/ferramenta cadastrado" description="Cadastre materiais e ferramentas no Painel Inicial do Almoxarifado." />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">

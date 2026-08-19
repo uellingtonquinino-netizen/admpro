@@ -1,0 +1,5 @@
+update public.usuarios
+set auth_user_id = 'COLE_O_USER_UID'
+where email = 'EMAIL_DO_ADMINISTRADOR';
+
+2127d707-fc67-4740-a41e-f2cc22d0c770

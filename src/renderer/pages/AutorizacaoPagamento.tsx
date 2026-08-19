@@ -15,9 +15,10 @@ import { SkeletonTable }        from '@components/ui/Skeleton'
 import EmptyState               from '@components/ui/EmptyState'
 import EmitirAPModal            from '@components/fornecedores/EmitirAPModal'
 import EditarApModal            from '@components/fornecedores/EditarApModal'
+import { fmtData } from '../documentos/base'
 import { gerarHtmlAP }          from '../documentos/ap'
 import { gerarCapaLote, ApCapaItem } from '../documentos/capaLote'
-import { aplicarCarimbosAP }    from '../utils/carimbosAp'
+import { montarCarimbosParaAnexos } from '../utils/carimbosAp'
 import { formatCPF, formatCNPJ } from '../utils/documentValidators'
 import { formatDate }           from '@utils/format'
 import {
@@ -40,6 +41,7 @@ interface ApRegistro {
   aprovado_central_por: string | null
   lote_id:            number | null
   created_at:         string
+  data_emissao?:      string | null
 }
 
 interface Resumo {
@@ -66,6 +68,9 @@ export default function AutorizacaoPagamento() {
   const empresaId  = useEmpresaStore(s => s.empresaId)
   const usuario    = useAuthStore(s => s.usuario)
   const somenteLeitura = usuario?.perfil === 'gestor'
+  // NOVO: por padrão só o Gestor aprova — ADM só se o Master tiver
+  // marcado a permissão extra "aprovar-documentos" pra ele.
+  const podeAprovar = usuario?.perfil !== 'admin' || !!usuario?.permissoes_extras?.includes('aprovar-documentos')
   const { format } = useCurrency()
   const { confirm, dialogProps } = useConfirm()
 
@@ -220,6 +225,15 @@ export default function AutorizacaoPagamento() {
       observacoes:      completa.observacoes ?? '',
       solicitante:      completa.solicitante ?? '',
       autorizadoPor:    completa.autorizado_por ?? '',
+      // CORRIGIDO: essa função também gera o PDF na reimpressão/
+      // aprovação (não só na hora de criar) — sem passar isso aqui,
+      // sempre caía no padrão "hoje" de documentos/ap.ts, mesmo
+      // quando a AP tinha uma data de emissão diferente já salva.
+      dataEmissao:      completa.data_emissao ? fmtData(completa.data_emissao) : undefined,
+      // NOVO: carimbo de quem autorizou (Gestor/ADM), embutido dentro
+      // do próprio HTML — ver comentário em documentos/ap.ts sobre por
+      // que isso é melhor do que carimbar por cima do PDF pronto.
+      carimboUrl:       completa.aprovado_por_carimbo_url ?? null,
     })
   }
 
@@ -250,7 +264,17 @@ export default function AutorizacaoPagamento() {
 
       const html = await montarHtmlAP(completa)
       const resultado = await window.api.documentos.salvarPdfInterno({
-        html, nomeArquivo, anexos: completa.anexos ?? [], pastaId: `AP_${a.id}`,
+        html, nomeArquivo, anexos: completa.anexos ?? [], pastaId: `AP_${a.id}`, empresa_id: empresaId ?? undefined,
+        // CORRIGIDO: faltava isso aqui — era só aqui que o carimbo do
+        // anexo se perdia. O documento principal já vinha certo
+        // (montarHtmlAP usa os campos aprovado_* direto do banco),
+        // mas os anexos "Vai Assinatura" só recebiam o carimbo lá em
+        // handleAutorizar (só roda 1x, no clique de aprovar) — uma AP
+        // aprovada pelo celular (que nunca gera PDF) chegava aqui sem
+        // nunca ter passado por lá. Agora usa os dados JÁ SALVOS na
+        // AP (não de quem está clicando agora), então funciona igual
+        // não importa onde/quando foi aprovada.
+        carimbos: montarCarimbosParaAnexos(completa),
       })
       if (resultado.ok) {
         await window.api.ap.salvarCaminhoPdf({ id: a.id, pdf_path: resultado.filePath })
@@ -259,8 +283,9 @@ export default function AutorizacaoPagamento() {
       } else {
         toast.error('Erro ao gerar o arquivo pra visualização.')
       }
-    } catch {
-      toast.error('Erro ao preparar a impressão.')
+    } catch (erro) {
+      console.error('Erro ao preparar a impressão:', erro)
+      toast.error(`Erro ao preparar a impressão: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setImprimindoId(null)
     }
@@ -278,24 +303,35 @@ export default function AutorizacaoPagamento() {
       const completa = await window.api.ap.buscarPorId(a.id)
       completa.aprovado_por = usuario.nome
       completa.aprovado_em  = aprovado_em
+      // CORRIGIDO: faltava atualizar isso junto com nome/data acima —
+      // sem isso, montarCarimbosParaAnexos(completa) pegaria o
+      // carimbo_url ANTIGO (vazio, já que essa AP nunca tinha sido
+      // aprovada antes agora), fazendo o carimbo do ANEXO cair pro
+      // texto reserva em vez da imagem de assinatura de verdade,
+      // mesmo o documento principal saindo certo. O código antigo não
+      // tinha esse problema porque usava usuario.carimbo_url direto,
+      // sem depender do completa recém-buscado.
+      completa.aprovado_por_carimbo_url = usuario.carimbo_url ?? null
 
       const html = await montarHtmlAP(completa)
       const resultado = await window.api.documentos.salvarPdfInterno({
-        html, nomeArquivo: `AP - ${completa.beneficiario_nome}`, anexos: completa.anexos ?? [], pastaId: `AP_${a.id}`,
+        html, nomeArquivo: `AP - ${completa.beneficiario_nome}`, anexos: completa.anexos ?? [], pastaId: `AP_${a.id}`, empresa_id: empresaId ?? undefined,
+        // ALTERADO: agora monta a partir do `completa` já atualizado
+        // acima (inclui Supervisor também, se por acaso já tiver
+        // aprovado antes do Gestor) — mesma função usada em
+        // handleImprimir/handleGerarLote, evita ter a mesma lógica
+        // escrita em mais de um lugar.
+        carimbos: montarCarimbosParaAnexos(completa),
       })
       if (resultado.ok) {
         await window.api.ap.salvarCaminhoPdf({ id: a.id, pdf_path: resultado.filePath })
-        // Carimbo do Gestor (canto esquerdo) e do Supervisor (canto
-        // direito, se já tiver aprovado antes) — mesmo tamanho, lado
-        // a lado.
-        const carimbo = await aplicarCarimbosAP(resultado.filePath, completa)
-        if (!carimbo.ok) toast.error(carimbo.erros.join(' '))
       }
 
       toast.success('AP autorizada.')
       atualizarTudo()
-    } catch {
-      toast.error('Erro ao autorizar a AP.')
+    } catch (erro) {
+      console.error('Erro ao autorizar a AP:', erro)
+      toast.error(`Erro ao autorizar a AP: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setAutorizandoId(null)
     }
@@ -320,7 +356,10 @@ export default function AutorizacaoPagamento() {
           const html = await montarHtmlAP(completa)
           const resultado = await window.api.documentos.salvarPdfInterno({
             html, nomeArquivo: `AP - ${completa.beneficiario_nome}`,
-            anexos: completa.anexos ?? [], pastaId: `AP_${id}`,
+            anexos: completa.anexos ?? [], pastaId: `AP_${id}`, empresa_id: empresaId ?? undefined,
+            // CORRIGIDO: mesmo problema do handleImprimir — faltava
+            // aqui também.
+            carimbos: montarCarimbosParaAnexos(completa),
           })
           if (resultado.ok) {
             await window.api.ap.salvarCaminhoPdf({ id, pdf_path: resultado.filePath })
@@ -363,7 +402,7 @@ export default function AutorizacaoPagamento() {
 
       const itens: ApCapaItem[] = dados.map((d: any, i: number) => ({
         numero: i + 1,
-        data_emissao: d.created_at,
+        data_emissao: d.data_emissao || d.created_at,
         nome_razao_social: d.beneficiario_nome,
         documento: d.cnpj ? formatCNPJ(d.cnpj) : (d.cpf ? formatCPF(d.cpf) : ''),
         banco: d.forma_pagamento === 'boleto' ? 'Boleto' : (d.banco ?? ''),
@@ -427,7 +466,15 @@ export default function AutorizacaoPagamento() {
   // NOVO: manda o lote já fechado pro Supervisor — a partir daqui
   // ele deixa de aparecer aqui destacado (some pra dentro do fluxo
   // normal de aprovação, acompanhável em Lotes Enviados).
+  // NOVO: pede confirmação antes — estava enviando direto no clique,
+  // sem chance de desfazer/conferir antes.
   async function handleEnviarLote(loteId: number) {
+    const ok = await confirm({
+      title:   'Enviar lote para o Supervisor',
+      message: 'Deseja enviar este lote para aprovação do Supervisor? Depois de enviado, ele sai daqui e entra no fluxo normal de aprovação.',
+    })
+    if (!ok) return
+
     setEnviandoLoteId(loteId)
     try {
       await window.api.lotes.enviarParaSupervisor({ lote_ids: [loteId] })
@@ -517,7 +564,7 @@ export default function AutorizacaoPagamento() {
         <td className="px-4 py-3 text-gray-400 max-w-xs truncate">{a.descricao ?? '—'}</td>
         <td className="px-4 py-3 text-gray-400">{a.qtd_boletos}</td>
         <td className="px-4 py-3 text-gray-200">{format(a.valor_total)}</td>
-        <td className="px-4 py-3 text-gray-500 text-xs">{formatDate(a.created_at.slice(0, 10))}</td>
+        <td className="px-4 py-3 text-gray-500 text-xs">{formatDate((a.data_emissao || a.created_at).slice(0, 10))}</td>
         <td className="px-4 py-3">
           {noLoteAbertoAgora ? (
             <Badge color="blue">No lote — não enviado</Badge>
@@ -545,7 +592,7 @@ export default function AutorizacaoPagamento() {
             >
               <Printer size={13} />
             </button>
-            {!a.aprovado_por && (
+            {!a.aprovado_por && podeAprovar && (
               <button
                 onClick={() => handleAutorizar(a)}
                 disabled={autorizandoId === a.id}
@@ -768,7 +815,7 @@ export default function AutorizacaoPagamento() {
           description={busca ? 'Ajuste a busca acima.' : 'Clique em "Nova Autorização de Pagamento" para emitir a primeira.'}
         />
       ) : (
-        <div className="bg-surface border border-surface-border rounded-xl overflow-hidden">
+        <div className="bg-surface border border-surface-border rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-border">
