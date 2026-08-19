@@ -35,6 +35,27 @@ async function getCurrentProfile() {
   }
 }
 
+// Fala com a Edge Function "usuarios-admin" (criar/remover usuário
+// exige privilégio elevado, não dá pra fazer isso com a chave
+// pública direto na tabela) — mesma lógica de usuarios.supabase.ipc.ts.
+async function chamarAdminUsuarios(body: Record<string, unknown>) {
+  const { data: sessao, error: sessaoErro } = await supabase.auth.getSession()
+  if (sessaoErro || !sessao.session) throw new Error('Sessão do Supabase não encontrada. Faça login novamente.')
+  const { data, error } = await supabase.functions.invoke('usuarios-admin', {
+    body, headers: { Authorization: `Bearer ${sessao.session.access_token}` },
+  })
+  if (error) {
+    const response = (error as { context?: Response }).context
+    if (response) {
+      const detalhe = await response.clone().json().catch(() => null) as { error?: string } | null
+      if (detalhe?.error) throw new Error(detalhe.error)
+    }
+    throw new Error(error.message)
+  }
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 const usuarios = {
   login: async (p: { email: string; senha: string }) => {
     const { error } = await supabase.auth.signInWithPassword({ email: p.email.trim(), password: p.senha })
@@ -69,18 +90,175 @@ const usuarios = {
     return { ok: !error }
   },
 
+  alterarEmail: async (p: { id: number; senha_atual: string; novo_email: string }) => {
+    const profile = await getCurrentProfile()
+    if (profile.id !== p.id) throw new Error('Não é permitido alterar o e-mail de outro usuário.')
+    const { error: loginError } = await supabase.auth.signInWithPassword({ email: profile.email, password: p.senha_atual })
+    if (loginError) throw new Error('Senha atual incorreta.')
+    const { error } = await supabase.auth.updateUser({ email: p.novo_email.trim() })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
   atualizarCarimbo: async (p: { carimbo_url: string | null }) => {
     const { error } = await supabase.rpc('atualizar_meu_carimbo', { p_carimbo_url: p.carimbo_url })
     if (error) throw new Error(error.message)
     return { ok: true }
   },
+
+  // NOVO: os que faltavam pra fechar o CRUD completo (tela de
+  // Usuários, gestão de permissões e obras vinculadas).
+  listar: async (empresaId: number) => {
+    const [{ data: usuariosCasa, error: erroCasa }, { data: vinculosExtras, error: erroVinculos }] = await Promise.all([
+      supabase.from('usuarios').select('id,empresa_id,nome,email,perfil,ativo,created_at,last_login_at,carimbo_url').eq('empresa_id', empresaId),
+      supabase.from('usuario_obras').select('usuario_id').eq('empresa_id', empresaId),
+    ])
+    if (erroCasa) throw new Error(erroCasa.message)
+    if (erroVinculos) throw new Error(erroVinculos.message)
+    const idsExtras = (vinculosExtras ?? []).map(v => v.usuario_id).filter(id => !(usuariosCasa ?? []).some(u => u.id === id))
+    let usuariosExtras: typeof usuariosCasa = []
+    if (idsExtras.length > 0) {
+      const { data, error } = await supabase.from('usuarios').select('id,empresa_id,nome,email,perfil,ativo,created_at,last_login_at,carimbo_url').in('id', idsExtras)
+      if (error) throw new Error(error.message)
+      usuariosExtras = data
+    }
+    const listaCompleta = [...(usuariosCasa ?? []), ...usuariosExtras].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+    return Promise.all(listaCompleta.map(async usuario => {
+      const [extras, supervisor, obras] = await Promise.all([
+        supabase.from('usuario_permissoes_extras').select('chave,negada').eq('usuario_id', usuario.id),
+        supabase.from('supervisor_obras').select('empresa_id').eq('usuario_id', usuario.id),
+        supabase.from('usuario_obras').select('empresa_id').eq('usuario_id', usuario.id),
+      ])
+      for (const r of [extras, supervisor, obras]) if (r.error) throw new Error(r.error.message)
+      return {
+        ...usuario,
+        permissoes_extras: (extras.data ?? []).filter(x => !x.negada).map(x => x.chave),
+        permissoes_negadas: (extras.data ?? []).filter(x => !!x.negada).map(x => x.chave),
+        obras_supervisor: (supervisor.data ?? []).map(x => x.empresa_id),
+        obras_extras: (obras.data ?? []).map(x => x.empresa_id),
+      }
+    }))
+  },
+
+  buscarPorId: async (id: number) => {
+    const { data: usuario, error } = await supabase.from('usuarios').select('id,empresa_id,nome,email,perfil,ativo,created_at,last_login_at,carimbo_url').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!usuario) return null
+    const [extras, supervisor, obras] = await Promise.all([
+      supabase.from('usuario_permissoes_extras').select('chave,negada').eq('usuario_id', id),
+      supabase.from('supervisor_obras').select('empresa_id').eq('usuario_id', id),
+      supabase.from('usuario_obras').select('empresa_id').eq('usuario_id', id),
+    ])
+    if (extras.error) throw new Error(extras.error.message)
+    if (supervisor.error) throw new Error(supervisor.error.message)
+    if (obras.error) throw new Error(obras.error.message)
+    return {
+      ...usuario,
+      permissoes_extras: (extras.data ?? []).filter(x => !x.negada).map(x => x.chave),
+      permissoes_negadas: (extras.data ?? []).filter(x => !!x.negada).map(x => x.chave),
+      obras_supervisor: (supervisor.data ?? []).map(x => x.empresa_id),
+      obras_extras: (obras.data ?? []).map(x => x.empresa_id),
+    }
+  },
+
+  atualizar: async (p: { id: number; nome: string; perfil: string; ativo: boolean }) => {
+    const { error } = await supabase.from('usuarios').update({ nome: p.nome, perfil: p.perfil, ativo: p.ativo ? 1 : 0 }).eq('id', p.id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  definirPermissoesExtras: async (p: { usuario_id: number; extras: string[]; negadas: string[] }) => {
+    const { error: apagarErro } = await supabase.from('usuario_permissoes_extras').delete().eq('usuario_id', p.usuario_id)
+    if (apagarErro) throw new Error(apagarErro.message)
+    const linhas = [...p.extras.map(chave => ({ usuario_id: p.usuario_id, chave, negada: 0 })), ...p.negadas.map(chave => ({ usuario_id: p.usuario_id, chave, negada: 1 }))]
+    if (linhas.length) {
+      const { error } = await supabase.from('usuario_permissoes_extras').insert(linhas)
+      if (error) throw new Error(error.message)
+    }
+    return { ok: true }
+  },
+
+  definirObras: async (p: { usuario_id: number; empresa_ids: number[] }) => {
+    const { error: apagarErro } = await supabase.from('usuario_obras').delete().eq('usuario_id', p.usuario_id)
+    if (apagarErro) throw new Error(apagarErro.message)
+    if (p.empresa_ids.length) {
+      const { error } = await supabase.from('usuario_obras').insert(p.empresa_ids.map(empresa_id => ({ usuario_id: p.usuario_id, empresa_id })))
+      if (error) throw new Error(error.message)
+    }
+    return { ok: true }
+  },
+
+  definirObrasSupervisor: async (p: { usuario_id: number; empresa_ids: number[] }) => {
+    const { error: apagarErro } = await supabase.from('supervisor_obras').delete().eq('usuario_id', p.usuario_id)
+    if (apagarErro) throw new Error(apagarErro.message)
+    if (p.empresa_ids.length) {
+      const { error } = await supabase.from('supervisor_obras').insert(p.empresa_ids.map(empresa_id => ({ usuario_id: p.usuario_id, empresa_id })))
+      if (error) throw new Error(error.message)
+    }
+    return { ok: true }
+  },
+
+  remover: async (p: { id: number } | number) => {
+    const id = typeof p === 'number' ? p : p.id
+    const { data: usuario } = await supabase.from('usuarios').select('nome,email,empresa_id').eq('id', id).single()
+    if (usuario) {
+      await supabase.rpc('registrar_exclusao', {
+        p_tabela: 'usuarios', p_registro_id: id,
+        p_descricao: `Usuário - ${usuario.nome} (${usuario.email})`, p_empresa_id: usuario.empresa_id,
+      })
+    }
+    return chamarAdminUsuarios({ acao: 'remover', id })
+  },
+
+  criar: async (p: { empresa_id: number; nome: string; email: string; senha: string; perfil: string }) => {
+    const data = await chamarAdminUsuarios({ acao: 'criar', ...p })
+    return { id: data.id }
+  },
 }
 
+interface EmpresaCriarPayload {
+  nome: string; titulo_obra?: string | null; razao_social?: string | null; cnpj: string | null
+  email: string | null; telefone: string | null; endereco: string | null; cidade?: string | null
+  estado?: string | null; logo_url?: string | null; solicitante_padrao?: string | null
+  autorizado_por_padrao?: string | null; codigo_empresa?: string | null
+}
+function normalizarEmpresa(payload: EmpresaCriarPayload) {
+  return {
+    ...payload,
+    titulo_obra: payload.titulo_obra ?? null, razao_social: payload.razao_social ?? null,
+    cidade: payload.cidade ?? null, estado: payload.estado ?? null, logo_url: payload.logo_url ?? null,
+    solicitante_padrao: payload.solicitante_padrao ?? null, autorizado_por_padrao: payload.autorizado_por_padrao ?? null,
+    codigo_empresa: payload.codigo_empresa ?? null,
+  }
+}
+// NOVO: usado em várias telas (Master, Configurações) — mesma lógica
+// de empresas.supabase.ipc.ts.
 const empresas = {
+  listar: async () => {
+    const { data, error } = await supabase.from('empresas').select('*').eq('ativo', 1).order('nome')
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
   buscarPorId: async (id: number) => {
     const { data, error } = await supabase.from('empresas').select('*').eq('id', id).maybeSingle()
     if (error) throw new Error(error.message)
     return data
+  },
+  criar: async (payload: EmpresaCriarPayload) => {
+    const { data, error } = await supabase.from('empresas').insert({ ...normalizarEmpresa(payload), ativo: 1 }).select('id').single()
+    if (error) throw new Error(error.message)
+    return { id: data.id }
+  },
+  atualizar: async (payload: EmpresaCriarPayload & { id: number }) => {
+    const { id, ...dados } = payload
+    const { error } = await supabase.from('empresas').update(normalizarEmpresa(dados)).eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  excluir: async (id: number) => {
+    const { error } = await supabase.from('empresas').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
   },
 }
 
