@@ -397,6 +397,30 @@ const colaboradoresApi = {
     if (error) throw new Error(error.message)
     return data ?? []
   },
+
+  // NOVO: usado pelo ColaboradorModal (aba de anexos) — mesma lógica
+  // de colaboradores.ipc.ts. Só a listagem por enquanto — anexar/
+  // excluir arquivo precisa do mesmo tratamento de seletor de
+  // arquivo do navegador que já fiz na importação por planilha,
+  // ainda não fiz pra esse caso específico.
+  listarAnexos: async (colaboradorId: number) => {
+    const { data, error } = await supabase.from('colaboradores_anexos').select('*').eq('colaborador_id', colaboradorId).order('created_at', { ascending: false })
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+}
+
+// NOVO: usado pelo ColaboradorModal (dropdowns de Função/Setor/
+// Equipe) — SUPOSIÇÃO, não tenho o opcoes.ipc.ts original ainda.
+// Assumi uma tabela "opcoes" com empresa_id/tipo/valor — se algo não
+// bater, é só colar o handler real (mesmo formato que você já colou
+// pro colaboradores.listarAnexos) que eu ajusto.
+const opcoesApi = {
+  listar: async (p: { empresa_id: number; tipo: string }) => {
+    const { data, error } = await supabase.from('opcoes').select('valor').eq('empresa_id', p.empresa_id).eq('tipo', p.tipo).order('valor')
+    if (error) throw new Error(error.message)
+    return (data ?? []).map(o => o.valor)
+  },
 }
 
 // ── Importação de Colaboradores por planilha ─────────────────
@@ -628,6 +652,11 @@ const fornecedoresApi = {
     if (error) throw new Error(error.message)
     return data ?? []
   },
+  buscarPorId: async (id: number) => {
+    const { data, error } = await supabase.from('fornecedores').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    return data ?? null
+  },
 }
 
 // NOVO: usado pela Navbar (sino — aviso de experiência vencendo e
@@ -664,4 +693,918 @@ const relatoriosRHApi = {
   },
 }
 
-export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi }
+// NOVO: usado pela tela de Autorização de Pagamento — mesma lógica
+// de ap.ipc.ts (só a parte Supabase, que já usa RPCs prontas no
+// banco pra a maioria das operações — muito mais simples de replicar
+// aqui do que a versão SQLite). `registrar`/`atualizar` aceitam
+// anexos como File[] (arquivo do navegador), fazendo o upload direto
+// pro Storage antes de chamar a RPC — diferente do desktop, que
+// recebe caminho de arquivo local.
+const apApi = {
+  buscarUltima: async (p: { beneficiario_tipo: string; beneficiario_id: number }) => {
+    const { data: ap, error } = await supabase.from('autorizacoes_pagamento').select('*')
+      .eq('beneficiario_tipo', p.beneficiario_tipo).eq('beneficiario_id', p.beneficiario_id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!ap) return undefined
+    const { data: boletos, error: e2 } = await supabase.from('autorizacoes_pagamento_boletos').select('valor,vencimento').eq('ap_id', ap.id).order('vencimento')
+    if (e2) throw new Error(e2.message)
+    return { ...ap, boletos: boletos ?? [] }
+  },
+
+  registrar: async (p: {
+    empresa_id: number; beneficiario_tipo: 'fornecedor' | 'colaborador'; beneficiario_id: number
+    beneficiario_nome: string; descricao?: string | null; boletos: { valor: number; vencimento: string }[]
+    observacoes?: string | null; solicitante?: string | null; autorizado_por?: string | null
+    anexos?: File[]
+  }) => {
+    const { data: apId, error } = await supabase.rpc('criar_ap', { p: { ...p, anexos: undefined } })
+    if (error) throw new Error(error.message)
+    for (let ordem = 0; ordem < (p.anexos?.length ?? 0); ordem++) {
+      const arquivo = p.anexos![ordem]
+      const remoto = `${p.empresa_id}/autorizacoes-pagamento/${apId}/${Date.now()}-${arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+      const { error: e2 } = await supabase.storage.from('documentos-rh').upload(remoto, arquivo)
+      if (e2) throw new Error(e2.message)
+      const { error: e3 } = await supabase.from('autorizacoes_pagamento_anexos').insert({ ap_id: apId, caminho: `supabase://${remoto}`, ordem })
+      if (e3) throw new Error(e3.message)
+    }
+    return { id: apId }
+  },
+
+  atualizar: async (p: {
+    id: number; beneficiario_nome: string; descricao?: string | null
+    boletos: { valor: number; vencimento: string }[]
+    observacoes?: string | null; solicitante?: string | null; autorizado_por?: string | null
+  }) => {
+    const { error } = await supabase.rpc('atualizar_ap', { p })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  capaPorIds: async (apIds: number[]) => {
+    if (apIds.length === 0) return []
+    const { data: aps, error } = await supabase.from('autorizacoes_pagamento').select('*').in('id', apIds).order('id')
+    if (error) throw new Error(error.message)
+    const { data: boletos, error: e2 } = await supabase.from('autorizacoes_pagamento_boletos').select('ap_id,valor,vencimento').in('ap_id', apIds)
+    if (e2) throw new Error(e2.message)
+    const idsBeneficiarios = { fornecedor: [] as number[], colaborador: [] as number[] }
+    for (const a of aps ?? []) idsBeneficiarios[a.beneficiario_tipo as 'fornecedor' | 'colaborador'].push(a.beneficiario_id)
+    const [fornecedores, colaboradores] = await Promise.all([
+      idsBeneficiarios.fornecedor.length ? supabase.from('fornecedores').select('id,cnpj,cpf,forma_pagamento,banco,agencia,operacao,conta,conta_digito').in('id', idsBeneficiarios.fornecedor) : Promise.resolve({ data: [] as any[], error: null }),
+      idsBeneficiarios.colaborador.length ? supabase.from('colaboradores').select('id,cpf,banco,agencia,operacao,conta,conta_digito').in('id', idsBeneficiarios.colaborador) : Promise.resolve({ data: [] as any[], error: null }),
+    ])
+    if (fornecedores.error || colaboradores.error) throw new Error(fornecedores.error?.message ?? colaboradores.error?.message)
+    const forn = new Map(fornecedores.data.map(f => [f.id, f]))
+    const colab = new Map(colaboradores.data.map(c => [c.id, c]))
+    return (aps ?? []).map(a => {
+      const bs = (boletos ?? []).filter(b => b.ap_id === a.id).sort((x, y) => x.vencimento.localeCompare(y.vencimento))
+      const dadosBancarios = a.beneficiario_tipo === 'fornecedor' ? forn.get(a.beneficiario_id) : colab.get(a.beneficiario_id)
+      return {
+        id: a.id, created_at: a.created_at, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
+        cnpj: a.beneficiario_tipo === 'fornecedor' ? dadosBancarios?.cnpj ?? null : null,
+        cpf: dadosBancarios?.cpf ?? null,
+        forma_pagamento: a.beneficiario_tipo === 'fornecedor' ? (dadosBancarios as any)?.forma_pagamento ?? null : null,
+        banco: dadosBancarios?.banco ?? null, agencia: dadosBancarios?.agencia ?? null, operacao: dadosBancarios?.operacao ?? null,
+        conta: dadosBancarios?.conta ?? null, conta_digito: dadosBancarios?.conta_digito ?? null,
+        primeiro_vencimento: bs[0]?.vencimento ?? null,
+        valor_total: bs.length ? bs.reduce((s, b) => s + Number(b.valor), 0) : Number(a.valor),
+      }
+    })
+  },
+
+  resumo: async (p: number | { empresa_id: number; dataInicio?: string; dataFim?: string }) => {
+    const empresa_id = typeof p === 'number' ? p : p.empresa_id
+    const dataInicio = typeof p === 'number' ? undefined : p.dataInicio
+    const dataFim = typeof p === 'number' ? undefined : p.dataFim
+    let q = supabase.from('autorizacoes_pagamento').select('beneficiario_nome,valor,created_at').eq('empresa_id', empresa_id)
+    if (dataInicio && dataFim) q = q.gte('created_at', dataInicio).lte('created_at', `${dataFim}T23:59:59.999Z`)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    const grupos = new Map<string, number>()
+    for (const a of data ?? []) grupos.set(a.beneficiario_nome, (grupos.get(a.beneficiario_nome) ?? 0) + Number(a.valor))
+    return {
+      total: (data ?? []).length,
+      valorTotal: (data ?? []).reduce((x, a) => x + Number(a.valor), 0),
+      porFornecedor: [...grupos].sort(([a], [b]) => a.localeCompare(b)).map(([nome, total]) => ({ nome, total })),
+    }
+  },
+
+  listar: async (p: { empresa_id: number; page?: number; perPage?: number; busca?: string; dataInicio?: string; dataFim?: string }) => {
+    const perPage = p.perPage ?? 20
+    const offset = ((p.page ?? 1) - 1) * perPage
+    let q = supabase.from('autorizacoes_pagamento').select('*').eq('empresa_id', p.empresa_id).order('created_at', { ascending: false })
+    if (p.dataInicio && p.dataFim) q = q.gte('created_at', p.dataInicio).lte('created_at', `${p.dataFim}T23:59:59.999Z`)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    let filtradas = data ?? []
+    if (p.busca) {
+      const b = p.busca.toLowerCase()
+      filtradas = filtradas.filter(a => a.beneficiario_nome.toLowerCase().includes(b) || (a.descricao ?? '').toLowerCase().includes(b) || String(a.valor).includes(b))
+    }
+    const ids = filtradas.map(a => a.id)
+    let boletos: any[] = []
+    if (ids.length) {
+      const r = await supabase.from('autorizacoes_pagamento_boletos').select('id,ap_id,valor').in('ap_id', ids)
+      if (r.error) throw new Error(r.error.message)
+      boletos = r.data ?? []
+    }
+    const items = filtradas.slice(offset, offset + perPage).map(a => {
+      const bs = boletos.filter(b => b.ap_id === a.id)
+      return { ...a, valor_total: bs.length ? bs.reduce((x, b) => x + Number(b.valor), 0) : Number(a.valor), qtd_boletos: bs.length }
+    })
+    return { items, total: filtradas.length }
+  },
+
+  buscarPorId: async (id: number) => {
+    const [{ data: ap, error: e1 }, { data: boletos, error: e2 }, { data: anexosRows, error: e3 }] = await Promise.all([
+      supabase.from('autorizacoes_pagamento').select('*').eq('id', id).maybeSingle(),
+      supabase.from('autorizacoes_pagamento_boletos').select('*').eq('ap_id', id).order('vencimento'),
+      supabase.from('autorizacoes_pagamento_anexos').select('caminho').eq('ap_id', id).order('ordem'),
+    ])
+    for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+    if (!ap) return null
+    const ids = [ap.aprovado_por_usuario_id, ap.aprovado_supervisor_por_usuario_id].filter((x): x is number => x !== null)
+    let usuarios: any[] = []
+    if (ids.length) {
+      const r = await supabase.from('usuarios').select('id,carimbo_url').in('id', ids)
+      if (r.error) throw new Error(r.error.message)
+      usuarios = r.data ?? []
+    }
+    const carimbos = new Map(usuarios.map(u => [u.id, u.carimbo_url]))
+    return {
+      ...ap,
+      aprovado_por_carimbo_url: carimbos.get(ap.aprovado_por_usuario_id) ?? null,
+      aprovado_supervisor_carimbo_url: carimbos.get(ap.aprovado_supervisor_por_usuario_id) ?? null,
+      boletos: boletos ?? [], anexos: (anexosRows ?? []).map(a => a.caminho),
+    }
+  },
+
+  salvarCaminhoPdf: async (p: { id: number; pdf_path: string }) => {
+    const { error } = await supabase.from('autorizacoes_pagamento').update({ pdf_path: p.pdf_path }).eq('id', p.id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  aprovar: async (p: { id: number; aprovado_por: string; aprovado_perfil?: string; usuario_id?: number | null }) => {
+    const { data, error } = await supabase.rpc('aprovar_ap', { p_id: p.id })
+    if (error) throw new Error(error.message)
+    return { ok: true, aprovado_em: data }
+  },
+
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_ap', { p_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+}
+
+// NOVO: usado pela tela de Autorização de Pagamento (lotes) — mesma
+// lógica de lotes.ipc.ts (só a parte Supabase, via RPCs).
+const lotesApi = {
+  listarAbertos: async (empresaId: number) => {
+    const [{ data: lotes, error: e1 }, { data: aps, error: e2 }, { data: nfs, error: e3 }] = await Promise.all([
+      supabase.from('lotes_financeiros').select('id,numero,titulo').eq('empresa_id', empresaId).is('enviado_em', null).order('numero', { ascending: false }),
+      supabase.from('autorizacoes_pagamento').select('lote_id,aprovado_por').eq('empresa_id', empresaId),
+      supabase.from('notas_fiscais').select('lote_id,aprovado_por').eq('empresa_id', empresaId),
+    ])
+    for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+    return (lotes ?? []).map(l => {
+      const a = (aps ?? []).filter(x => x.lote_id === l.id), n = (nfs ?? []).filter(x => x.lote_id === l.id)
+      return { ...l, total_itens: a.length + n.length, nao_aprovados: a.filter(x => x.aprovado_por === null).length + n.filter(x => x.aprovado_por === null).length }
+    })
+  },
+
+  adicionarAoLote: async (p: { lote_id: number; usuario_id?: number | null; ap_ids: number[]; nf_ids: number[] }) => {
+    if (!p.ap_ids.length && !p.nf_ids.length) throw new Error('Selecione ao menos uma AP ou Nota Fiscal.')
+    const { error } = await supabase.rpc('adicionar_itens_lote', { p })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  tirarDoLote: async (p: { item_tipo: 'ap' | 'nf'; item_id: number }) => {
+    const { data, error } = await supabase.rpc('tirar_item_lote', { p_tipo: p.item_tipo, p_item_id: p.item_id })
+    if (error) throw new Error(error.message)
+    return { ok: true, loteApagado: data }
+  },
+
+  enviarParaSupervisor: async (p: { lote_ids: number[] }) => {
+    if (!p.lote_ids.length) throw new Error('Selecione ao menos um lote.')
+    const { data, error } = await supabase.rpc('enviar_lotes_supervisor', { p_lote_ids: p.lote_ids })
+    if (error) throw new Error(error.message)
+    return { lotes: data ?? [] }
+  },
+}
+
+// NOVO: usado nas telas de Categorias e Lançamentos — mesma lógica
+// de categorias.ipc.ts (RPCs).
+const categoriasApi = {
+  listar: async (params: { empresa_id: number; tipo?: string }) => {
+    let query = supabase.from('categorias').select('*').eq('empresa_id', params.empresa_id).order('nome')
+    if (params.tipo) query = query.in('tipo', [params.tipo, 'ambos'])
+    const { data, error } = await query
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+  criar: async (p: { empresa_id: number; nome: string; tipo: string; cor: string }) => {
+    const { data, error } = await supabase.rpc('criar_categoria', { p })
+    if (error) throw new Error(error.message)
+    return { id: data }
+  },
+  atualizar: async (p: { id: number; empresa_id: number; nome: string; tipo: string; cor: string }) => {
+    const { error } = await supabase.rpc('atualizar_categoria', { p })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_categoria', { p_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  sugestoes: async (params: { empresa_id: number; busca: string; tipo?: string }) => {
+    let query = supabase.from('categorias').select('id,nome,tipo,cor').eq('empresa_id', params.empresa_id)
+      .ilike('nome', `%${params.busca.replace(/[%_]/g, '\\$&')}%`).order('nome').limit(10)
+    if (params.tipo) query = query.in('tipo', [params.tipo, 'ambos'])
+    const { data, error } = await query
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+}
+
+// NOVO: usado nas telas de Contas e Lançamentos — mesma lógica de
+// contas.ipc.ts (RPCs).
+const contasApi = {
+  listar: async (params: { empresa_id: number; ativo?: number }) => {
+    let query = supabase.from('contas').select('*').eq('empresa_id', params.empresa_id).order('nome')
+    if (params.ativo !== undefined) query = query.eq('ativo', params.ativo)
+    const { data, error } = await query
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+  buscarPorId: async (id: number) => {
+    const { data, error } = await supabase.from('contas').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    return data ?? null
+  },
+  criar: async (p: { empresa_id: number; nome: string; tipo: string; saldo: number; banco: string | null; agencia: string | null; numero: string | null; ativo: number }) => {
+    const { data, error } = await supabase.rpc('criar_conta', { p })
+    if (error) throw new Error(error.message)
+    return { id: data }
+  },
+  atualizar: async (p: { id: number; empresa_id: number; nome: string; tipo: string; saldo: number; banco: string | null; agencia: string | null; numero: string | null; ativo: number }) => {
+    const { error } = await supabase.rpc('atualizar_conta', { p })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_conta', { p_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  saldoTotal: async (empresaId: number) => {
+    const { data, error } = await supabase.from('contas').select('saldo').eq('empresa_id', empresaId).eq('ativo', 1)
+    if (error) throw new Error(error.message)
+    return (data ?? []).reduce((r, c) => {
+      const saldo = Number(c.saldo); r.total += saldo
+      saldo >= 0 ? r.positivo += saldo : r.negativo += saldo
+      return r
+    }, { positivo: 0, negativo: 0, total: 0 })
+  },
+}
+
+// NOVO: usado em Contas a Pagar e Contas a Receber — mesma lógica de
+// contasAPagar.ipc.ts / contasAReceber.ipc.ts (RPCs).
+function criarApiContasPagarReceber(tipo: 'despesa' | 'receita') {
+  return {
+    listar: async (p: { empresa_id: number; situacao?: 'a_vencer' | 'vencido' | 'pago'; busca?: string }) => {
+      let q = supabase.from('lancamentos').select('id,descricao,valor,data,data_venc,status,data_pgto,fornecedor_id')
+        .eq('empresa_id', p.empresa_id).eq('tipo', tipo).neq('status', 'cancelado').order('data_venc')
+      const hoje = new Date().toISOString().slice(0, 10)
+      if (p.situacao === 'pago') q = q.eq('status', 'pago')
+      else if (p.situacao === 'vencido') q = q.eq('status', 'pendente').lt('data_venc', hoje)
+      else if (p.situacao === 'a_vencer') q = q.eq('status', 'pendente').gte('data_venc', hoje)
+      if (p.busca) q = q.ilike('descricao', `%${p.busca.replace(/[%_]/g, '\\$&')}%`)
+      const { data, error } = await q
+      if (error) throw new Error(error.message)
+      return (data ?? []).map(x => ({ ...x, situacao: x.status === 'pago' ? 'pago' : x.data_venc < hoje ? 'vencido' : 'a_vencer', origem: 'outro' }))
+    },
+    darBaixa: async (p: { id: number; data_pgto?: string }) => {
+      const { error } = await supabase.rpc('atualizar_baixa_lancamento', { p_id: p.id, p_status: 'pago', p_data: p.data_pgto ?? null })
+      if (error) throw new Error(error.message)
+      return { ok: true }
+    },
+    reabrir: async (id: number) => {
+      const { error } = await supabase.rpc('atualizar_baixa_lancamento', { p_id: id, p_status: 'pendente', p_data: null })
+      if (error) throw new Error(error.message)
+      return { ok: true }
+    },
+    pagarParcial: async (p: { id: number; valor_pago: number; novo_vencimento: string; data_pgto?: string }) => {
+      const { data, error } = await supabase.rpc('pagamento_parcial', { p })
+      if (error) throw new Error(error.message)
+      return { ok: true, novoId: data }
+    },
+  }
+}
+const contasAPagarApi = criarApiContasPagarReceber('despesa')
+const contasAReceberApi = criarApiContasPagarReceber('receita')
+
+// NOVO: usado em telas que emitem Recibo avulso — o recibos.ipc.ts
+// original não tem parte Supabase nenhuma (só SQLite), então essa é
+// uma implementação equivalente, não uma cópia.
+const recibosApi = {
+  emitir: async (p: { empresa_id: number; beneficiario_nome: string; valor: number; referente?: string | null }) => {
+    const { data, error } = await supabase.from('recibos').insert({
+      empresa_id: p.empresa_id, beneficiario_nome: p.beneficiario_nome, valor: p.valor, referente: p.referente ?? null,
+    }).select('id').single()
+    if (error) throw new Error(error.message)
+    return { numero: data.id }
+  },
+}
+
+// NOVO: usado em modais que cadastram gente sem vínculo formal
+// (diarista, etc.) — mesma lógica de pessoasAvulsas.ipc.ts.
+const pessoasAvulsasApi = {
+  listar: async (p: { empresa_id: number; busca?: string }) => {
+    let q = supabase.from('pessoas_avulsas').select('*').eq('empresa_id', p.empresa_id).order('nome')
+    if (p.busca) q = q.ilike('nome', `%${p.busca.replace(/[%_]/g, '\\$&')}%`)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+  criar: async (p: { empresa_id: number; nome: string; cpf?: string | null }) => {
+    const { data, error } = await supabase.from('pessoas_avulsas').insert({ empresa_id: p.empresa_id, nome: p.nome, cpf: p.cpf ?? null }).select('id').single()
+    if (error) throw new Error(error.message)
+    return { id: data.id }
+  },
+}
+
+// NOVO: usado pelo painel do Administrador Master (Escritório
+// Central, Setor Pessoal, Supervisores, gestão de obras) — mesma
+// lógica de master.ipc.ts.
+const masterApi = {
+  escritorio: async () => {
+    const [{ data: centrais, error: e1 }, { data: aps, error: e2 }, { data: nfs, error: e3 }] = await Promise.all([
+      supabase.from('usuarios').select('id,nome,email,ativo,last_login_at').eq('perfil', 'central').order('nome'),
+      supabase.from('autorizacoes_pagamento').select('aprovado_central_por'),
+      supabase.from('notas_fiscais').select('aprovado_central_por'),
+    ])
+    for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+    return (centrais ?? []).map(c => ({
+      ...c, ativo: !!c.ativo,
+      itens_aprovados: (aps ?? []).filter(a => a.aprovado_central_por === c.nome).length + (nfs ?? []).filter(n => n.aprovado_central_por === c.nome).length,
+    }))
+  },
+
+  setorPessoal: async () => {
+    const [{ data: usuariosRows, error: e1 }, { data: solicitacoes, error: e2 }] = await Promise.all([
+      supabase.from('usuarios').select('id,nome,email,ativo,last_login_at').eq('perfil', 'setor_pessoal').order('nome'),
+      supabase.from('solicitacoes_pessoal').select('respondido_por'),
+    ])
+    for (const e of [e1, e2]) if (e) throw new Error(e.message)
+    return (usuariosRows ?? []).map(u => ({ ...u, ativo: !!u.ativo, solicitacoes_respondidas: (solicitacoes ?? []).filter(x => x.respondido_por === u.nome).length }))
+  },
+
+  supervisores: async () => {
+    const [{ data: supervisoresRows, error: e1 }, { data: links, error: e2 }, { data: obras, error: e3 }, { data: aps, error: e4 }, { data: nfs, error: e5 }] = await Promise.all([
+      supabase.from('usuarios').select('id,nome,email,ativo,last_login_at').eq('perfil', 'supervisor').order('nome'),
+      supabase.from('supervisor_obras').select('usuario_id,empresa_id'),
+      supabase.from('empresas').select('id,nome'),
+      supabase.from('autorizacoes_pagamento').select('aprovado_supervisor_por'),
+      supabase.from('notas_fiscais').select('aprovado_supervisor_por'),
+    ])
+    for (const e of [e1, e2, e3, e4, e5]) if (e) throw new Error(e.message)
+    const obraPorId = new Map((obras ?? []).map(o => [o.id, o]))
+    return (supervisoresRows ?? []).map(u => ({
+      ...u, ativo: !!u.ativo,
+      obras: (links ?? []).filter(l => l.usuario_id === u.id).map(l => obraPorId.get(l.empresa_id)).filter(Boolean),
+      itens_aprovados: (aps ?? []).filter(a => a.aprovado_supervisor_por === u.nome).length + (nfs ?? []).filter(n => n.aprovado_supervisor_por === u.nome).length,
+    }))
+  },
+
+  definirObrasSupervisor: async (p: { usuario_id: number; empresa_ids: number[] }) => {
+    const { error: apagarErro } = await supabase.from('supervisor_obras').delete().eq('usuario_id', p.usuario_id)
+    if (apagarErro) throw new Error(apagarErro.message)
+    if (p.empresa_ids.length) {
+      const { error } = await supabase.from('supervisor_obras').insert(p.empresa_ids.map(empresa_id => ({ usuario_id: p.usuario_id, empresa_id })))
+      if (error) throw new Error(error.message)
+    }
+    return { ok: true }
+  },
+
+  obras: async () => {
+    const { data, error } = await supabase.from('empresas').select('id,nome,cnpj,cidade,estado,logo_url').order('nome')
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+
+  obraDetalhe: async (empresaId: number) => {
+    const [{ data: empresa, error: e1 }, { data: colaboradoresRows, error: e2 }, { data: lancamentosRows, error: e3 }, { data: usuariosRows, error: e4 }, { data: links, error: e5 }] = await Promise.all([
+      supabase.from('empresas').select('*').eq('id', empresaId).maybeSingle(),
+      supabase.from('colaboradores').select('status,salario_base').eq('empresa_id', empresaId),
+      supabase.from('lancamentos').select('valor,data,status,tipo').eq('empresa_id', empresaId),
+      supabase.from('usuarios').select('id,nome,email,perfil,ativo,last_login_at').eq('empresa_id', empresaId).in('perfil', ['admin', 'gestor', 'almoxarife']).order('perfil').order('nome'),
+      supabase.from('supervisor_obras').select('usuario_id').eq('empresa_id', empresaId),
+    ])
+    for (const e of [e1, e2, e3, e4, e5]) if (e) throw new Error(e.message)
+    if (!empresa) return null
+    const ativos = (colaboradoresRows ?? []).filter(c => c.status === 'ativo')
+    const inicio = new Date(); inicio.setDate(1)
+    const inicioMes = inicio.toISOString().slice(0, 10)
+    const gastos_mes = (lancamentosRows ?? []).filter(l => l.tipo === 'despesa' && l.status !== 'cancelado' && l.data >= inicioMes).reduce((x, l) => x + Number(l.valor), 0)
+    const ids = (links ?? []).map(l => l.usuario_id)
+    let supervisoresLista: unknown[] = []
+    if (ids.length) {
+      const { data, error } = await supabase.from('usuarios').select('id,nome').in('id', ids)
+      if (error) throw new Error(error.message)
+      supervisoresLista = data ?? []
+    }
+    return {
+      empresa, colaboradores: ativos.length, custo_folha: ativos.reduce((x, c) => x + Number(c.salario_base), 0),
+      gastos_mes, usuarios: (usuariosRows ?? []).map(u => ({ ...u, ativo: !!u.ativo })), supervisores: supervisoresLista,
+    }
+  },
+}
+
+// NOVO: usado pela tela de Notas Fiscais — mesma lógica de
+// notasFiscais.ipc.ts (RPCs, e o mesmo padrão de anexos File[] que
+// já usei em ap.registrar).
+const notasFiscaisApi = {
+  listar: async (p: { empresa_id: number; busca?: string; dataInicio?: string; dataFim?: string }) => {
+    let query = supabase.from('notas_fiscais').select('*,notas_fiscais_boletos(valor)').eq('empresa_id', p.empresa_id).order('data', { ascending: false })
+    if (p.dataInicio && p.dataFim) query = query.gte('data', p.dataInicio).lte('data', p.dataFim)
+    if (p.busca) query = query.ilike('fornecedor_nome', `%${p.busca.replace(/[%_]/g, '\\$&')}%`)
+    const { data, error } = await query
+    if (error) throw new Error(error.message)
+    return (data ?? []).map((n: any) => ({ ...n, valor_total: (n.notas_fiscais_boletos ?? []).reduce((s: number, b: any) => s + Number(b.valor), 0), qtd_boletos: n.notas_fiscais_boletos?.length ?? 0 }))
+  },
+
+  capaPorIds: async (notaIds: number[]) => {
+    if (notaIds.length === 0) return []
+    const [{ data: notas, error: e1 }, { data: boletos, error: e2 }] = await Promise.all([
+      supabase.from('notas_fiscais').select('id,numero_pedido,numero_nf,data_emissao_nf,fornecedor_nome').in('id', notaIds).order('id'),
+      supabase.from('notas_fiscais_boletos').select('nota_id,valor,vencimento').in('nota_id', notaIds).order('vencimento'),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    return (notas ?? []).map(n => {
+      const itens = (boletos ?? []).filter(b => b.nota_id === n.id)
+      return { ...n, boletos: itens, valor_total: itens.reduce((x, b) => x + Number(b.valor), 0) }
+    })
+  },
+
+  buscarPorId: async (id: number) => {
+    const [{ data: nota, error: e1 }, { data: boletos, error: e2 }, { data: anexos, error: e3 }] = await Promise.all([
+      supabase.from('notas_fiscais').select('*').eq('id', id).maybeSingle(),
+      supabase.from('notas_fiscais_boletos').select('*').eq('nota_id', id).order('vencimento'),
+      supabase.from('notas_fiscais_anexos').select('*').eq('nota_id', id).order('categoria').order('ordem'),
+    ])
+    for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+    if (!nota) return null
+    const ids = [nota.aprovado_por_usuario_id, nota.aprovado_supervisor_por_usuario_id].filter((x): x is number => x !== null)
+    let usuarios: any[] = []
+    if (ids.length) {
+      const r = await supabase.from('usuarios').select('id,carimbo_url').in('id', ids)
+      if (r.error) throw new Error(r.error.message)
+      usuarios = r.data ?? []
+    }
+    const carimbos = new Map(usuarios.map(u => [u.id, u.carimbo_url]))
+    return {
+      ...nota,
+      aprovado_por_carimbo_url: carimbos.get(nota.aprovado_por_usuario_id) ?? null,
+      aprovado_supervisor_carimbo_url: carimbos.get(nota.aprovado_supervisor_por_usuario_id) ?? null,
+      boletos: boletos ?? [],
+      anexos_nota: (anexos ?? []).filter(a => a.categoria === 'nota').map(a => a.caminho),
+      anexos_boletos: (anexos ?? []).filter(a => a.categoria === 'boleto').map(a => a.caminho),
+    }
+  },
+
+  criar: async (p: {
+    empresa_id: number; numero_pedido?: string | null; data: string; numero_nf?: string | null
+    data_emissao_nf?: string | null; fornecedor_id?: number | null; fornecedor_nome: string
+    boletos: { valor: number; vencimento: string }[]
+    anexos_nota?: File[]; anexos_boletos?: File[]
+  }) => {
+    const { data: notaId, error } = await supabase.rpc('criar_nota_fiscal', { p: { ...p, anexos_nota: undefined, anexos_boletos: undefined } })
+    if (error) throw new Error(error.message)
+    const enviar = async (arquivos: File[], categoria: 'nota' | 'boleto') => {
+      for (let ordem = 0; ordem < arquivos.length; ordem++) {
+        const arquivo = arquivos[ordem]
+        const remoto = `${p.empresa_id}/notas-fiscais/${notaId}/${categoria}-${Date.now()}-${arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+        const { error: e2 } = await supabase.storage.from('documentos-rh').upload(remoto, arquivo)
+        if (e2) throw new Error(e2.message)
+        const { error: e3 } = await supabase.from('notas_fiscais_anexos').insert({ nota_id: notaId, caminho: `supabase://${remoto}`, categoria, ordem })
+        if (e3) throw new Error(e3.message)
+      }
+    }
+    await enviar(p.anexos_nota ?? [], 'nota')
+    await enviar(p.anexos_boletos ?? [], 'boleto')
+    return { id: notaId }
+  },
+
+  atualizar: async (p: {
+    id: number; numero_pedido?: string | null; data: string; numero_nf?: string | null
+    data_emissao_nf?: string | null; fornecedor_id?: number | null; fornecedor_nome: string
+    boletos: { valor: number; vencimento: string }[]
+  }) => {
+    const { error } = await supabase.rpc('atualizar_nota_fiscal', { p })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  // NOVO: sem parte Supabase no original (só SQLite) — implementação
+  // equivalente.
+  salvarCaminhosPdf: async (p: { id: number; nota_pdf_path?: string | null; boletos_pdf_path?: string | null }) => {
+    const patch: Record<string, string> = {}
+    if (p.nota_pdf_path) patch.nota_pdf_path = p.nota_pdf_path
+    if (p.boletos_pdf_path) patch.boletos_pdf_path = p.boletos_pdf_path
+    const { error } = await supabase.from('notas_fiscais').update(patch).eq('id', p.id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  aprovar: async (p: { id: number; aprovado_por: string; aprovado_perfil?: string; usuario_id?: number | null }) => {
+    const { data, error } = await supabase.rpc('aprovar_nota_fiscal', { p_id: p.id })
+    if (error) throw new Error(error.message)
+    return { ok: true, aprovado_em: data }
+  },
+
+  resumo: async (p: number | { empresa_id: number; dataInicio?: string; dataFim?: string }) => {
+    const empresa_id = typeof p === 'number' ? p : p.empresa_id
+    const dataInicio = typeof p === 'number' ? undefined : p.dataInicio
+    const dataFim = typeof p === 'number' ? undefined : p.dataFim
+    let q = supabase.from('notas_fiscais').select('id,fornecedor_nome,data').eq('empresa_id', empresa_id)
+    if (dataInicio && dataFim) q = q.gte('data', dataInicio).lte('data', dataFim)
+    const { data: notas, error } = await q
+    if (error) throw new Error(error.message)
+    const ids = (notas ?? []).map(n => n.id)
+    let boletos: any[] = []
+    if (ids.length) {
+      const r = await supabase.from('notas_fiscais_boletos').select('nota_id,valor').in('nota_id', ids)
+      if (r.error) throw new Error(r.error.message)
+      boletos = r.data ?? []
+    }
+    const nomes = new Map((notas ?? []).map(n => [n.id, n.fornecedor_nome]))
+    const grupos = new Map<string, number>()
+    for (const b of boletos) {
+      const nome = nomes.get(b.nota_id) ?? 'Sem fornecedor'
+      grupos.set(nome, (grupos.get(nome) ?? 0) + Number(b.valor))
+    }
+    return {
+      total: (notas ?? []).length, valorTotal: boletos.reduce((x, b) => x + Number(b.valor), 0),
+      porFornecedor: [...grupos].sort(([a], [b]) => a.localeCompare(b)).map(([nome, total]) => ({ nome, total })),
+    }
+  },
+
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_nota_fiscal', { p_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+}
+
+// NOVO: usado na tela de Almoxarifado (Entradas) — mesma lógica de
+// almoxarifadoEntradas.ipc.ts (RPCs).
+const almoxarifadoEntradasApi = {
+  listar: async (p: { empresa_id: number; busca?: string }) => {
+    let q = supabase.from('almoxarifado_entradas').select('*').eq('empresa_id', p.empresa_id).order('data', { ascending: false }).order('id', { ascending: false })
+    if (p.busca) {
+      const termo = p.busca.replace(/[(),.]/g, ' ')
+      q = q.or(`numero_nota.ilike.%${termo}%,numero_pedido.ilike.%${termo}%,fornecedor_nome.ilike.%${termo}%`)
+    }
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+  buscarPorId: async (id: number) => {
+    const [{ data: entrada, error: e1 }, { data: itens, error: e2 }] = await Promise.all([
+      supabase.from('almoxarifado_entradas').select('*').eq('id', id).maybeSingle(),
+      supabase.from('almoxarifado_entradas_itens').select('*').eq('entrada_id', id),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    return entrada ? { ...entrada, itens: itens ?? [] } : null
+  },
+  criar: async (p: {
+    empresa_id: number; numero_nota?: string | null; numero_pedido?: string | null; data: string
+    fornecedor_id?: number | null; fornecedor_nome: string; valor_desconto?: number
+    itens: { produto_id: number; produto_codigo: string; produto_nome: string; quantidade: number; valor_unitario: number }[]
+  }) => {
+    const { data, error } = await supabase.rpc('criar_entrada_almoxarifado', { p })
+    if (error) throw new Error(error.message)
+    return { id: data }
+  },
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_entrada_almoxarifado', { p_entrada_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+}
+
+// NOVO: usado na tela de Almoxarifado (Saídas) — mesma lógica de
+// almoxarifadoSaidas.ipc.ts (RPCs).
+const almoxarifadoSaidasApi = {
+  listar: async (p: { empresa_id: number; busca?: string; dataInicio?: string; dataFim?: string }) => {
+    let q = supabase.from('almoxarifado_saidas').select('*').eq('empresa_id', p.empresa_id).order('data', { ascending: false }).order('id', { ascending: false })
+    if (p.busca) {
+      const termo = p.busca.replace(/[(),.]/g, ' ')
+      q = q.or(`produto_nome.ilike.%${termo}%,produto_codigo.ilike.%${termo}%,retirado_por_nome.ilike.%${termo}%`)
+    }
+    if (p.dataInicio && p.dataFim) q = q.gte('data', p.dataInicio).lte('data', p.dataFim)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+  buscarPorId: async (id: number) => {
+    const { data, error } = await supabase.from('almoxarifado_saidas').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    return data ?? null
+  },
+  criar: async (p: {
+    empresa_id: number; data: string; produto_id: number; produto_codigo: string; produto_nome: string; quantidade: number
+    retirado_por_tipo: 'colaborador' | 'avulso'; retirado_por_id?: number | null; retirado_por_nome: string
+    setor?: string | null; solicitado_por_id?: number | null; solicitado_por_nome?: string | null; liberado_por?: string | null
+  }) => {
+    const { data, error } = await supabase.rpc('criar_saida_almoxarifado', { p })
+    if (error) throw new Error(error.message)
+    return { id: data }
+  },
+  // NOVO: sem parte Supabase no original (só SQLite) — implementação equivalente.
+  salvarCaminhoPdf: async (p: { id: number; pdf_path: string }) => {
+    const { error } = await supabase.from('almoxarifado_saidas').update({ pdf_path: p.pdf_path }).eq('id', p.id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_saida_almoxarifado', { p_saida_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+}
+
+// NOVO: usado nas telas de Solicitações ao Setor Pessoal (ADM e
+// Setor Pessoal) — mesma lógica de solicitacoesPessoal.ipc.ts, com
+// anexos como File[] (upload direto pro Storage), incluindo as
+// notificações (mesma tabela notificacoes_eventos já usada em outros
+// módulos).
+const TITULO_TIPO_SOLICITACAO: Record<string, string> = {
+  admissao: 'Admissão', desligamento: 'Desligamento', alteracao_salarial: 'Alteração salarial', outro: 'Movimentação',
+}
+async function enviarAnexosSolicitacao(empresaId: number, solicitacaoId: number, arquivos: { arquivo: File }[], origem: 'adm' | 'setor_pessoal') {
+  for (let ordem = 0; ordem < arquivos.length; ordem++) {
+    const { arquivo } = arquivos[ordem]
+    const remoto = `${empresaId}/solicitacoes/${solicitacaoId}/${Date.now()}-${arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const { error: e1 } = await supabase.storage.from('documentos-rh').upload(remoto, arquivo)
+    if (e1) throw new Error(e1.message)
+    const { error: e2 } = await supabase.from('solicitacoes_pessoal_anexos').insert({ solicitacao_id: solicitacaoId, caminho: `supabase://${remoto}`, nome: arquivo.name, origem, ordem })
+    if (e2) throw new Error(e2.message)
+  }
+}
+const solicitacoesPessoalApi = {
+  criar: async (p: {
+    empresa_id: number; colaborador_id: number; tipo: 'admissao' | 'desligamento' | 'alteracao_salarial' | 'outro'
+    observacoes?: string | null; solicitado_por: string; anexos?: { arquivo: File }[]
+  }) => {
+    const { data, error } = await supabase.from('solicitacoes_pessoal').insert({
+      empresa_id: p.empresa_id, colaborador_id: p.colaborador_id, tipo: p.tipo,
+      observacoes: p.observacoes ?? null, solicitado_por: p.solicitado_por,
+    }).select('id').single()
+    if (error) throw new Error(error.message)
+    await enviarAnexosSolicitacao(p.empresa_id, data.id, p.anexos ?? [], 'adm')
+
+    const { data: colaborador } = await supabase.from('colaboradores').select('nome').eq('id', p.colaborador_id).maybeSingle()
+    await supabase.from('notificacoes_eventos').insert({
+      empresa_id: p.empresa_id, tipo: 'solicitacao_pessoal_nova', destinatario_perfil: 'setor_pessoal',
+      titulo: `${TITULO_TIPO_SOLICITACAO[p.tipo] ?? 'Movimentação'} — ${colaborador?.nome ?? 'colaborador'}`,
+      mensagem: p.observacoes || null, referencia_id: data.id,
+    })
+
+    return { id: data.id }
+  },
+
+  listarPorObra: async (empresaId: number) => {
+    const [{ data: solicitacoes, error: e1 }, { data: colaboradoresRows, error: e2 }] = await Promise.all([
+      supabase.from('solicitacoes_pessoal').select('*').eq('empresa_id', empresaId).order('solicitado_em', { ascending: false }),
+      supabase.from('colaboradores').select('id,nome').eq('empresa_id', empresaId),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    const nomes = new Map((colaboradoresRows ?? []).map(c => [c.id, c.nome]))
+    return (solicitacoes ?? []).map(s => ({ ...s, colaborador_nome: nomes.get(s.colaborador_id) ?? null }))
+  },
+
+  listarTodas: async () => {
+    const [{ data: solicitacoes, error: e1 }, { data: colaboradoresRows, error: e2 }, { data: empresasRows, error: e3 }] = await Promise.all([
+      supabase.from('solicitacoes_pessoal').select('*').order('solicitado_em', { ascending: false }),
+      supabase.from('colaboradores').select('id,nome'),
+      supabase.from('empresas').select('id,nome'),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    if (e3) throw new Error(e3.message)
+    const nomes = new Map((colaboradoresRows ?? []).map(c => [c.id, c.nome]))
+    const obras = new Map((empresasRows ?? []).map(e => [e.id, e.nome]))
+    return (solicitacoes ?? []).map(s => ({ ...s, colaborador_nome: nomes.get(s.colaborador_id) ?? null, obra_nome: obras.get(s.empresa_id) ?? null, obra_id: s.empresa_id }))
+  },
+
+  buscarPorId: async (id: number) => {
+    const { data: solicitacao, error } = await supabase.from('solicitacoes_pessoal').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!solicitacao) return null
+    const [{ data: empresa, error: e1 }, { data: colaborador, error: e2 }, { data: anexos, error: e3 }] = await Promise.all([
+      supabase.from('empresas').select('nome').eq('id', solicitacao.empresa_id).maybeSingle(),
+      supabase.from('colaboradores').select('*').eq('id', solicitacao.colaborador_id).maybeSingle(),
+      supabase.from('solicitacoes_pessoal_anexos').select('id,caminho,nome,origem,ordem').eq('solicitacao_id', id).order('origem').order('ordem'),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    if (e3) throw new Error(e3.message)
+    return {
+      ...solicitacao, obra_nome: empresa?.nome ?? null, colaborador,
+      anexos_adm: (anexos ?? []).filter(a => a.origem === 'adm'),
+      anexos_setor_pessoal: (anexos ?? []).filter(a => a.origem === 'setor_pessoal'),
+    }
+  },
+
+  responder: async (p: { id: number; respondido_por: string; resposta_observacoes?: string | null; anexos?: { arquivo: File }[] }) => {
+    const { data: solicitacao, error: e0 } = await supabase.from('solicitacoes_pessoal').select('empresa_id').eq('id', p.id).single()
+    if (e0) throw new Error(e0.message)
+    const { error } = await supabase.from('solicitacoes_pessoal').update({
+      status: 'respondido', respondido_por: p.respondido_por, resposta_observacoes: p.resposta_observacoes ?? null, respondido_em: new Date().toISOString(),
+    }).eq('id', p.id)
+    if (error) throw new Error(error.message)
+    await enviarAnexosSolicitacao(solicitacao.empresa_id, p.id, p.anexos ?? [], 'setor_pessoal')
+
+    const { data: detalhe } = await supabase.from('solicitacoes_pessoal').select('tipo, colaboradores(nome)').eq('id', p.id).maybeSingle()
+    const colaboradorNome = (detalhe as any)?.colaboradores?.nome ?? 'colaborador'
+    for (const destinatario of ['admin', 'gestor']) {
+      await supabase.from('notificacoes_eventos').insert({
+        empresa_id: solicitacao.empresa_id, tipo: 'solicitacao_pessoal_respondida', destinatario_perfil: destinatario,
+        titulo: `Setor Pessoal respondeu — ${colaboradorNome}`,
+        mensagem: `${TITULO_TIPO_SOLICITACAO[detalhe?.tipo ?? 'outro'] ?? 'Movimentação'} — documentos prontos pra baixar`,
+        referencia_id: p.id,
+      })
+    }
+
+    return { ok: true }
+  },
+
+  concluir: async (id: number) => {
+    const { error } = await supabase.from('solicitacoes_pessoal').update({ status: 'concluido', concluido_em: new Date().toISOString() }).eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+}
+
+// NOVO: usado na tela de Exportação de Lançamentos — o
+// exportacao.ipc.ts original não tem parte Supabase (só SQLite), e
+// usa diálogo nativo do Windows pra salvar — aqui vira download
+// direto do navegador.
+const exportacaoApi = {
+  exportar: async (p: { empresa_id: number; formato: 'csv' | 'pdf' | 'json' }) => {
+    const { data, error } = await supabase.from('lancamentos')
+      .select('id,data,descricao,valor,tipo,status,categoria_id,conta_id')
+      .eq('empresa_id', p.empresa_id).order('data', { ascending: false })
+    if (error) throw new Error(error.message)
+    const categoriaIds = [...new Set((data ?? []).map(l => l.categoria_id).filter(Boolean))]
+    const contaIds = [...new Set((data ?? []).map(l => l.conta_id).filter(Boolean))]
+    const [categorias, contas] = await Promise.all([
+      categoriaIds.length ? supabase.from('categorias').select('id,nome').in('id', categoriaIds) : Promise.resolve({ data: [] as any[], error: null }),
+      contaIds.length ? supabase.from('contas').select('id,nome').in('id', contaIds) : Promise.resolve({ data: [] as any[], error: null }),
+    ])
+    const cats = new Map((categorias.data ?? []).map(c => [c.id, c.nome]))
+    const contasMap = new Map((contas.data ?? []).map(c => [c.id, c.nome]))
+    const lancamentos = (data ?? []).map(l => ({ ...l, categoria: cats.get(l.categoria_id) ?? null, conta: contasMap.get(l.conta_id) ?? null }))
+
+    if (p.formato === 'json') return JSON.stringify({ lancamentos }, null, 2)
+
+    if (p.formato === 'csv') {
+      const cabecalho = ['ID', 'Data', 'Descrição', 'Valor', 'Tipo', 'Status', 'Categoria', 'Conta'].join(';')
+      const linhas = lancamentos.map(l => [
+        l.id, l.data, `"${String(l.descricao).replace(/"/g, '""')}"`, String(l.valor).replace('.', ','),
+        l.tipo, l.status, l.categoria ?? '', l.conta ?? '',
+      ].join(';'))
+      return [cabecalho, ...linhas].join('\n')
+    }
+
+    const rows = lancamentos.map(l => `
+      <tr>
+        <td>${l.data}</td><td>${l.descricao}</td>
+        <td>${l.tipo === 'receita' ? '+' : '-'} R$ ${Number(l.valor).toFixed(2)}</td>
+        <td>${l.tipo}</td><td>${l.status}</td><td>${l.categoria ?? '-'}</td><td>${l.conta ?? '-'}</td>
+      </tr>`).join('')
+    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8" /><style>
+        body { font-family: sans-serif; font-size: 11px; margin: 24px; }
+        h1 { font-size: 16px; margin-bottom: 16px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 6px 8px; border: 1px solid #ddd; text-align: left; }
+        th { background: #f3f4f6; } tr:nth-child(even) { background: #f9fafb; }
+      </style></head><body><h1>Relatório de Lançamentos</h1><table><thead><tr>
+        <th>Data</th><th>Descrição</th><th>Valor</th><th>Tipo</th><th>Status</th><th>Categoria</th><th>Conta</th>
+      </tr></thead><tbody>${rows}</tbody></table></body></html>`
+  },
+
+  salvarArquivo: async (p: { nome: string; conteudo: string; formato: 'csv' | 'pdf' | 'json' }) => {
+    const tipoMime = p.formato === 'csv' ? 'text/csv' : p.formato === 'json' ? 'application/json' : 'text/html'
+    const blob = new Blob([p.conteudo], { type: tipoMime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = p.nome
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+    return { ok: true, filePath: p.nome }
+  },
+}
+
+// NOVO: usado no Painel do Supervisor — mesma lógica de
+// supervisorPainel.ipc.ts (registrado como window.api.supervisor).
+const supervisorApi = {
+  painelInicio: async (p: { empresa_ids: number[]; dataInicio: string; dataFim: string }) => {
+    if (p.empresa_ids.length === 0) {
+      return { obras: [], totalColaboradores: 0, idadeMedia: null, admissoes: 0, desligamentos: 0, totalAutorizacoes: 0, totalNotasFiscais: 0 }
+    }
+    const [{ data: obras, error: e1 }, { data: colaboradoresRows, error: e2 }, { data: aps, error: e3 }, { data: nfs, error: e4 }, { data: boletos, error: e5 }] = await Promise.all([
+      supabase.from('empresas').select('id,nome,titulo_obra,estado').in('id', p.empresa_ids).order('nome'),
+      supabase.from('colaboradores').select('status,nascimento,data_admissao,data_demissao').in('empresa_id', p.empresa_ids),
+      supabase.from('autorizacoes_pagamento').select('id,valor,created_at').in('empresa_id', p.empresa_ids),
+      supabase.from('notas_fiscais').select('id,data').in('empresa_id', p.empresa_ids),
+      supabase.from('notas_fiscais_boletos').select('nota_id,valor'),
+    ])
+    for (const e of [e1, e2, e3, e4, e5]) if (e) throw new Error(e.message)
+    const periodo = (d: string | null) => !!d && d.slice(0, 10) >= p.dataInicio && d.slice(0, 10) <= p.dataFim
+    const ativos = (colaboradoresRows ?? []).filter(c => c.status === 'ativo')
+    const idades = ativos.filter(c => c.nascimento).map(c => (Date.now() - new Date(`${c.nascimento}T00:00:00`).getTime()) / 31557600000)
+    const nfIds = new Set((nfs ?? []).filter(n => periodo(n.data)).map(n => n.id))
+    return {
+      obras: obras ?? [], totalColaboradores: ativos.length,
+      idadeMedia: idades.length ? Math.round(idades.reduce((a, b) => a + b, 0) / idades.length) : null,
+      admissoes: (colaboradoresRows ?? []).filter(c => periodo(c.data_admissao)).length,
+      desligamentos: (colaboradoresRows ?? []).filter(c => periodo(c.data_demissao)).length,
+      totalAutorizacoes: (aps ?? []).filter(a => periodo(a.created_at)).reduce((x, a) => x + Number(a.valor), 0),
+      totalNotasFiscais: (boletos ?? []).filter(b => nfIds.has(b.nota_id)).reduce((x, b) => x + Number(b.valor), 0),
+    }
+  },
+
+  graficosObras: async (p: { empresa_ids: number[]; meses: number }) => {
+    if (p.empresa_ids.length === 0) return { admissoesDesligamentos: [], despesasMensais: [], colaboradores: { ativos: 0, ferias: 0, afastados: 0, desligados: 0, total: 0 } }
+    const [{ data: colaboradoresRows, error: e1 }, { data: aps, error: e2 }, { data: nfs, error: e3 }, { data: boletos, error: e4 }] = await Promise.all([
+      supabase.from('colaboradores').select('status,data_admissao,data_demissao').in('empresa_id', p.empresa_ids),
+      supabase.from('autorizacoes_pagamento').select('id,valor,created_at').in('empresa_id', p.empresa_ids),
+      supabase.from('notas_fiscais').select('id,data').in('empresa_id', p.empresa_ids),
+      supabase.from('notas_fiscais_boletos').select('nota_id,valor'),
+    ])
+    for (const e of [e1, e2, e3, e4]) if (e) throw new Error(e.message)
+    const mesesLista: string[] = []
+    const hoje = new Date(); hoje.setDate(1)
+    for (let i = p.meses - 1; i >= 0; i--) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1)
+      mesesLista.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    }
+    const add = (mapa: Map<string, number>, d: string | null, v = 1) => { if (d && mesesLista.includes(d.slice(0, 7))) mapa.set(d.slice(0, 7), (mapa.get(d.slice(0, 7)) ?? 0) + v) }
+    const adm = new Map<string, number>(), desl = new Map<string, number>(), gastos = new Map<string, number>()
+    for (const c of colaboradoresRows ?? []) { add(adm, c.data_admissao); add(desl, c.data_demissao) }
+    for (const a of aps ?? []) add(gastos, a.created_at, Number(a.valor))
+    const nfPorId = new Map((nfs ?? []).map(n => [n.id, n.data]))
+    for (const b of boletos ?? []) add(gastos, nfPorId.get(b.nota_id) ?? null, Number(b.valor))
+    const status = new Map<string, number>()
+    for (const c of colaboradoresRows ?? []) status.set(c.status, (status.get(c.status) ?? 0) + 1)
+    const ativos = status.get('ativo') ?? 0, ferias = status.get('ferias') ?? 0, afastados = status.get('afastado') ?? 0, desligados = status.get('desligado') ?? 0
+    return {
+      admissoesDesligamentos: mesesLista.map(m => ({ mes: m, admissoes: adm.get(m) ?? 0, desligamentos: desl.get(m) ?? 0 })),
+      despesasMensais: mesesLista.map(m => ({ mes: m, total: gastos.get(m) ?? 0 })),
+      colaboradores: { ativos, ferias, afastados, desligados, total: ativos + ferias + afastados + desligados },
+    }
+  },
+
+  colaboradoresPorDimensao: async (p: { empresa_ids: number[]; dimensao: 'status' | 'setor' | 'funcao' }) => {
+    if (p.empresa_ids.length === 0) return { itens: [], total: 0 }
+    const { data, error } = await supabase.from('colaboradores').select(p.dimensao).in('empresa_id', p.empresa_ids)
+    if (error) throw new Error(error.message)
+    const grupos = new Map<string, number>()
+    for (const c of data ?? []) {
+      const chave = String((c as Record<string, unknown>)[p.dimensao] ?? '').trim() || 'Não informado'
+      grupos.set(chave, (grupos.get(chave) ?? 0) + 1)
+    }
+    const itens = [...grupos].map(([chave, total]) => ({ chave, total })).sort((a, b) => b.total - a.total)
+    return { itens, total: itens.reduce((x, i) => x + i.total, 0) }
+  },
+
+  notificacoesObras: async (empresaIds: number[]) => {
+    if (empresaIds.length === 0) return []
+    const [{ data: aps, error: e1 }, { data: nfs, error: e2 }, { data: colaboradoresRows, error: e3 }] = await Promise.all([
+      supabase.from('autorizacoes_pagamento').select('empresa_id,lote_id,aprovado_supervisor_por').in('empresa_id', empresaIds),
+      supabase.from('notas_fiscais').select('empresa_id,lote_id,aprovado_supervisor_por').in('empresa_id', empresaIds),
+      supabase.from('colaboradores').select('empresa_id,data_admissao,data_demissao').in('empresa_id', empresaIds),
+    ])
+    for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+    const limite = new Date(); limite.setDate(limite.getDate() - 7)
+    const dataLimite = limite.toISOString().slice(0, 10)
+    return empresaIds.map(empresaId => {
+      const aps_pendentes = (aps ?? []).filter(a => a.empresa_id === empresaId && a.lote_id !== null && a.aprovado_supervisor_por === null).length
+      const nfs_pendentes = (nfs ?? []).filter(n => n.empresa_id === empresaId && n.lote_id !== null && n.aprovado_supervisor_por === null).length
+      const admissoes_recentes = (colaboradoresRows ?? []).filter(c => c.empresa_id === empresaId && !!c.data_admissao && c.data_admissao >= dataLimite).length
+      const desligamentos_recentes = (colaboradoresRows ?? []).filter(c => c.empresa_id === empresaId && !!c.data_demissao && c.data_demissao >= dataLimite).length
+      return { empresa_id: empresaId, aps_pendentes, nfs_pendentes, admissoes_recentes, desligamentos_recentes, total: aps_pendentes + nfs_pendentes + admissoes_recentes + desligamentos_recentes }
+    })
+  },
+}
+
+export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi }

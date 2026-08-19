@@ -35,18 +35,36 @@ async function iniciar() {
     return
   }
 
-  // Carregamento tardio — só depois de window.api já estar pronto,
-  // pra garantir que nenhuma tela tente chamar window.api.algumaCoisa
-  // antes dele existir.
-  const { default: AppRoutes } = await import('../renderer/routes/AppRoutes')
+  try {
+    // Carregamento tardio — só depois de window.api já estar pronto,
+    // pra garantir que nenhuma tela tente chamar window.api.algumaCoisa
+    // antes dele existir.
+    const { default: AppRoutes } = await import('../renderer/routes/AppRoutes')
 
-  raiz.render(
-    <React.StrictMode>
-      <HashRouter>
-        <AppRoutes />
-      </HashRouter>
-    </React.StrictMode>
-  )
+    raiz.render(
+      <React.StrictMode>
+        <HashRouter>
+          <AppRoutes />
+        </HashRouter>
+      </React.StrictMode>
+    )
+  } catch (erro) {
+    // NOVO: antes, um erro aqui deixava a tela em branco/escura sem
+    // nenhuma pista do que aconteceu — agora aparece na cara, com o
+    // texto do erro, pra dar pra diagnosticar sem precisar abrir o
+    // console.
+    console.error('Erro ao iniciar o app web:', erro)
+    raiz.render(
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f1117', color: '#fff', padding: 24, fontFamily: 'monospace' }}>
+        <div style={{ maxWidth: 640 }}>
+          <p style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Erro ao carregar o sistema</p>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 13, color: '#f87171' }}>
+            {erro instanceof Error ? (erro.stack ?? erro.message) : String(erro)}
+          </pre>
+        </div>
+      </div>
+    )
+  }
 }
 
 iniciar()
