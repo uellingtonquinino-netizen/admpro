@@ -478,6 +478,30 @@ const lancamentosApi = {
       })),
     }
   },
+
+  criar: async (p: {
+    empresa_id: number; descricao: string; valor: number; tipo: 'receita' | 'despesa'; status: string
+    data: string; data_venc: string | null; categoria_id: number; conta_id: number; observacao: string | null
+  }) => {
+    const { data, error } = await supabase.rpc('criar_lancamento', { p })
+    if (error) throw new Error(error.message)
+    return { id: data }
+  },
+
+  atualizar: async (p: {
+    id: number; descricao: string; valor: number; tipo: 'receita' | 'despesa'; status: string
+    data: string; data_venc: string | null; categoria_id: number; conta_id: number; observacao: string | null
+  }) => {
+    const { error } = await supabase.rpc('atualizar_lancamento', { p })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_lancamento', { p_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
 }
 
 // NOVO: usado pelo Dashboard/ResumoRHObra — mesma lógica de
@@ -593,11 +617,35 @@ const colaboradoresApi = {
 // Assumi uma tabela "opcoes" com empresa_id/tipo/valor — se algo não
 // bater, é só colar o handler real (mesmo formato que você já colou
 // pro colaboradores.listarAnexos) que eu ajusto.
+// CORRIGIDO: minha suposição anterior estava errada (tabela "opcoes"
+// com coluna "valor") — a tabela real é opcoes_colaborador, com
+// coluna "nome" e soft-delete via "ativo". Corrigido pra bater com
+// opcoes.ipc.ts de verdade, e completado o CRUD (antes só tinha
+// listar).
 const opcoesApi = {
-  listar: async (p: { empresa_id: number; tipo: string }) => {
-    const { data, error } = await supabase.from('opcoes').select('valor').eq('empresa_id', p.empresa_id).eq('tipo', p.tipo).order('valor')
+  listar: async (p: { empresa_id: number; tipo: 'funcao' | 'setor' | 'equipe' }) => {
+    const { data, error } = await supabase.from('opcoes_colaborador').select('*').eq('empresa_id', p.empresa_id).eq('tipo', p.tipo).eq('ativo', 1).order('nome')
     if (error) throw new Error(error.message)
-    return (data ?? []).map(o => o.valor)
+    return data ?? []
+  },
+  criar: async (p: { empresa_id: number; tipo: 'funcao' | 'setor' | 'equipe'; nome: string }) => {
+    const nome = p.nome.trim()
+    const { data: existente, error: e1 } = await supabase.from('opcoes_colaborador').select('id').eq('empresa_id', p.empresa_id).eq('tipo', p.tipo).eq('nome', nome).maybeSingle()
+    if (e1) throw new Error(e1.message)
+    if (existente) throw new Error('Já existe um item com esse nome.')
+    const { data, error } = await supabase.from('opcoes_colaborador').insert({ ...p, nome }).select('id').single()
+    if (error) throw new Error(error.message)
+    return { id: data.id, nome }
+  },
+  atualizar: async (p: { id: number; nome: string }) => {
+    const { error } = await supabase.from('opcoes_colaborador').update({ nome: p.nome.trim() }).eq('id', p.id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  excluir: async (id: number) => {
+    const { error } = await supabase.from('opcoes_colaborador').update({ ativo: 0 }).eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
   },
 }
 
@@ -821,6 +869,13 @@ const produtosApi = {
   },
 }
 
+interface FornecedorPayload {
+  nome: string; tipo_pessoa: 'pj' | 'pf'; cnpj?: string | null; cpf?: string | null
+  email?: string | null; telefone?: string | null; endereco?: string | null; categoria?: string | null
+  forma_pagamento: 'boleto' | 'conta'; banco?: string | null; agencia?: string | null; operacao?: string | null
+  conta?: string | null; conta_digito?: string | null; tipo_conta?: string | null; chave_pix?: string | null
+  ativo?: boolean
+}
 const fornecedoresApi = {
   listar: async (p: { empresa_id: number; busca?: string; ativo?: boolean }) => {
     let query = supabase.from('fornecedores').select('*').eq('empresa_id', p.empresa_id).order('nome')
@@ -830,10 +885,35 @@ const fornecedoresApi = {
     if (error) throw new Error(error.message)
     return data ?? []
   },
+  listarResumo: async (empresaId: number) => {
+    const { data, error } = await supabase.from('fornecedores').select('id,nome,cnpj,cpf,tipo_pessoa').eq('empresa_id', empresaId).eq('ativo', 1).order('nome')
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
   buscarPorId: async (id: number) => {
     const { data, error } = await supabase.from('fornecedores').select('*').eq('id', id).maybeSingle()
     if (error) throw new Error(error.message)
     return data ?? null
+  },
+  criar: async (p: FornecedorPayload & { empresa_id: number }) => {
+    const { data, error } = await supabase.from('fornecedores').insert({ ...p, ativo: p.ativo === false ? 0 : 1 }).select('id').single()
+    if (error) throw new Error(error.message)
+    return { id: data.id }
+  },
+  atualizar: async (p: FornecedorPayload & { id: number }) => {
+    const { id, ...dados } = p
+    const { error } = await supabase.from('fornecedores').update({ ...dados, ativo: p.ativo === false ? 0 : 1 }).eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  excluir: async (id: number) => {
+    const { data: fornecedor } = await supabase.from('fornecedores').select('nome,cnpj,cpf,empresa_id').eq('id', id).single()
+    if (fornecedor) {
+      await supabase.rpc('registrar_exclusao', { p_tabela: 'fornecedores', p_registro_id: id, p_descricao: `Fornecedor - ${fornecedor.nome}`, p_empresa_id: fornecedor.empresa_id })
+    }
+    const { error } = await supabase.from('fornecedores').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
   },
 }
 
