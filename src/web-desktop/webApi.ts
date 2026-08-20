@@ -2318,4 +2318,142 @@ const supervisorApi = {
   },
 }
 
-export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi }
+// NOVO: usado por qualquer tela que gera/imprime documento (AP, Nota
+// Fiscal, etc) — fala com o serviço de PDF isolado na Vercel
+// (Puppeteer + Chrome de verdade), em vez do Electron gerando local.
+// Documentado no repositório em pdf-service/.
+const PDF_SERVICE_URL = import.meta.env.VITE_PDF_SERVICE_URL as string ?? 'https://admpro-pdf-service.vercel.app'
+
+async function chamarServicoPdf(caminho: string, corpo: Record<string, unknown>) {
+  const { data: sessao, error } = await supabase.auth.getSession()
+  if (error || !sessao.session) throw new Error('Sessão do Supabase não encontrada. Faça login novamente.')
+  const resposta = await fetch(`${PDF_SERVICE_URL}${caminho}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessao.session.access_token}` },
+    body: JSON.stringify(corpo),
+  })
+  const json = await resposta.json()
+  if (!resposta.ok) throw new Error(json.error ?? json.erro ?? `Erro ao gerar o documento (status ${resposta.status}).`)
+  return json
+}
+
+// Baixa um arquivo do Storage (via URL assinada) e devolve como Blob
+// — usado tanto pra abrir num aba nova quanto pra baixar de verdade.
+async function baixarComoBlob(caminhoStorage: string): Promise<Blob> {
+  const semPrefixo = caminhoStorage.replace('supabase://documentos-rh/', '')
+  const { data, error } = await supabase.storage.from('documentos-rh').download(semPrefixo)
+  if (error || !data) throw new Error(error?.message ?? 'Arquivo não encontrado.')
+  return data
+}
+
+const documentosApi = {
+  // ALTERADO: no desktop, abre o diálogo de impressão nativo. Na web,
+  // não existe — abre o HTML numa aba nova e chama o print() do
+  // próprio navegador (que também deixa "Salvar como PDF"), sem
+  // precisar do serviço de PDF pra esse caso simples (sem anexo).
+  imprimir: async (p: { html: string; landscape?: boolean; nomeArquivo?: string }) => {
+    const janela = window.open('', '_blank')
+    if (!janela) return { ok: false }
+    janela.document.write(p.html)
+    janela.document.close()
+    janela.onload = () => { janela.focus(); janela.print() }
+    return { ok: true }
+  },
+
+  // NOVO: salva automaticamente (mesmo fluxo do desktop, chamado
+  // depois de registrar/aprovar uma AP ou Nota Fiscal) — fala com o
+  // serviço de PDF, que já sobe pro Storage sozinho.
+  salvarPdfInterno: async (p: {
+    html: string; landscape?: boolean; nomeArquivo: string; pastaId: string; empresa_id?: number
+    anexos?: { caminho: string; vaiAssinatura?: boolean }[]
+    carimbos?: { aprovadoPor: string; aprovadoEm: string; carimboBase64?: string | null; posicao: 'inferior-esquerdo' | 'inferior-direito' }[]
+  }) => {
+    if (!p.empresa_id) throw new Error('empresa_id é obrigatório pra salvar o documento.')
+    const resultado = await chamarServicoPdf('/api/gerar-pdf', p)
+    return { ok: true, filePath: resultado.path }
+  },
+
+  // NOVO: usado pela Nota Fiscal — só junta os anexos (nota e
+  // boletos) em dois PDFs separados, sem gerar nenhum documento base
+  // (por isso não manda "html").
+  gerarPdfsSeparados: async (p: {
+    notaArquivos: string[]; boletoArquivos: string[]; pastaId: string; empresa_id?: number
+  }) => {
+    if (!p.empresa_id) throw new Error('empresa_id é obrigatório pra salvar o documento.')
+    let notaPdfPath: string | null = null
+    let boletosPdfPath: string | null = null
+    if (p.notaArquivos.length > 0) {
+      const r = await chamarServicoPdf('/api/gerar-pdf', {
+        nomeArquivo: `${p.pastaId}_nota`, pastaId: p.pastaId, empresa_id: p.empresa_id,
+        anexos: p.notaArquivos.map(caminho => ({ caminho })),
+      })
+      notaPdfPath = r.path
+    }
+    if (p.boletoArquivos.length > 0) {
+      const r = await chamarServicoPdf('/api/gerar-pdf', {
+        nomeArquivo: `${p.pastaId}_boletos`, pastaId: p.pastaId, empresa_id: p.empresa_id,
+        anexos: p.boletoArquivos.map(caminho => ({ caminho })),
+      })
+      boletosPdfPath = r.path
+    }
+    return { ok: true, notaPdfPath, boletosPdfPath }
+  },
+
+  // NOVO: carimba a primeira página de um PDF já salvo — usa o
+  // endpoint leve (sem Chrome), bem mais rápido.
+  carimbarPrimeiraPagina: async (p: {
+    caminhoPdf: string; aprovadoPor: string; aprovadoEm: string; carimboBase64?: string | null
+    posicao?: 'inferior-esquerdo' | 'inferior-direito'; tamanho?: 'normal' | 'pequeno'
+  }) => {
+    try {
+      await chamarServicoPdf('/api/carimbar-pdf', { caminhoPdf: p.caminhoPdf, carimbo: p })
+      return { ok: true }
+    } catch (erro) {
+      console.error('Erro ao carimbar PDF:', p.caminhoPdf, erro)
+      return { ok: false, erro: erro instanceof Error ? erro.message : String(erro) }
+    }
+  },
+
+  // ALTERADO: no desktop abre no leitor padrão do Windows. Na web,
+  // abre numa aba nova do navegador (que já sabe visualizar PDF
+  // sozinho).
+  abrirArquivo: async (caminho: string) => {
+    try {
+      const blob = await baixarComoBlob(caminho)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank')
+      return { ok: true, erro: null }
+    } catch (erro) {
+      return { ok: false, erro: erro instanceof Error ? erro.message : 'Erro ao abrir o arquivo.' }
+    }
+  },
+
+  // ALTERADO: no desktop copia os PDFs pra uma pasta escolhida pelo
+  // usuário — não existe "pasta local" na web. Em vez disso, baixa
+  // tudo junto num único arquivo .zip.
+  gerarLote: async (arquivos: { origem: string; nomeArquivo: string }[]) => {
+    const JSZip = (await import('jszip')).default
+    const zip = new JSZip()
+    let copiados = 0
+    const falhas: string[] = []
+    for (const arq of arquivos) {
+      try {
+        const blob = await baixarComoBlob(arq.origem)
+        zip.file(`${arq.nomeArquivo}.pdf`, blob)
+        copiados++
+      } catch {
+        falhas.push(arq.nomeArquivo)
+      }
+    }
+    if (copiados === 0) return { ok: false, canceled: false }
+    const conteudoZip = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(conteudoZip)
+    const a = document.createElement('a')
+    a.href = url; a.download = `lote-aps-${Date.now()}.zip`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+    return { ok: true, copiados, falhas }
+  },
+}
+
+export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi }
