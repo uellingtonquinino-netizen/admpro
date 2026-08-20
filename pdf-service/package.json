@@ -5,7 +5,7 @@
   "description": "Serviço isolado, na Vercel, que gera PDF a partir de HTML (a mesma automação de carimbo/anexos que o desktop já faz, só que rodando no servidor em vez do computador). Projeto separado do app mobile de propósito — assim nenhum problema aqui afeta o mobile.",
   "type": "module",
   "engines": {
-    "node": ">=22.x"
+    "node": "20.x"
   },
   "dependencies": {
     "@sparticuz/chromium-min": "^131.0.1",
