@@ -427,6 +427,16 @@ const notificacoesApi = {
 // NOVO: usado pelo Dashboard (card de Custo de Salários) — mesma
 // lógica de folhaPagamento.ipc.ts (só o pedaço necessário aqui, o
 // resto do módulo vem depois, quando migrar a tela de Folha em si).
+const CAMPOS_ITEM_FOLHA = ['h_premio', 'producao', 'vale_transporte', 'insalubridade', 'periculosidade', 'adc_noturno', 'he_50', 'he_80', 'he_100', 'he_110', 'atrasos', 'faltas', 'outros_eventos'] as const
+function normalizarItemFolha(item: Record<string, unknown>): Record<string, unknown> {
+  const norm = { ...item }
+  for (const campo of CAMPOS_ITEM_FOLHA) {
+    const v = norm[campo]
+    norm[campo] = v === null || v === undefined || v === '' ? null : Number(v)
+  }
+  return norm
+}
+
 const folhaPagamentoApi = {
   buscarPorCompetencia: async (p: { empresa_id: number; mes_competencia: string }) => {
     const { data: folha, error: e1 } = await supabase.from('folhas_pagamento')
@@ -451,6 +461,70 @@ const folhaPagamentoApi = {
       itens: (itens ?? []).map(i => ({ ...i, salario_base: i.colaborador_id ? salarioPorId.get(i.colaborador_id) ?? null : null })),
     }
   },
+
+  // NOVO: completa o resto da tela de Folha de Pagamento — mesma
+  // lógica de folhaPagamento.ipc.ts (só a parte Supabase).
+  colaboradoresAtivos: async (empresaId: number) => {
+    const { data, error } = await supabase.from('colaboradores').select('id,nome,matricula_esocial,cpf,salario_base').eq('empresa_id', empresaId).eq('status', 'ativo').order('nome')
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+
+  listar: async (empresaId: number) => {
+    const { data, error } = await supabase.from('folhas_pagamento').select('id,mes_competencia,criado_por,created_at').eq('empresa_id', empresaId).order('mes_competencia', { ascending: false })
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+
+  buscarPorId: async (id: number) => {
+    const [{ data: folha, error: e1 }, { data: itens, error: e2 }] = await Promise.all([
+      supabase.from('folhas_pagamento').select('*').eq('id', id).maybeSingle(),
+      supabase.from('folhas_pagamento_itens').select('*').eq('folha_id', id).order('ordem'),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    if (!folha) return null
+    return { ...folha, itens: itens ?? [] }
+  },
+
+  criar: async (p: { empresa_id: number; mes_competencia: string; criado_por?: string | null; itens: Record<string, unknown>[] }) => {
+    const { data: folha, error: e1 } = await supabase.from('folhas_pagamento')
+      .insert({ empresa_id: p.empresa_id, mes_competencia: p.mes_competencia, criado_por: p.criado_por }).select('id').single()
+    if (e1) throw new Error(e1.message)
+    if (p.itens.length) {
+      const linhas = p.itens.map((item, ordem) => ({ folha_id: folha.id, ordem, ...normalizarItemFolha(item) }))
+      const { error: e2 } = await supabase.from('folhas_pagamento_itens').insert(linhas)
+      if (e2) throw new Error(e2.message)
+    }
+    return { id: folha.id }
+  },
+
+  atualizar: async (p: { id: number; mes_competencia: string; itens: Record<string, unknown>[] }) => {
+    const { error: e1 } = await supabase.from('folhas_pagamento').update({ mes_competencia: p.mes_competencia, updated_at: new Date().toISOString() }).eq('id', p.id)
+    if (e1) throw new Error(e1.message)
+    const { error: e2 } = await supabase.from('folhas_pagamento_itens').delete().eq('folha_id', p.id)
+    if (e2) throw new Error(e2.message)
+    if (p.itens.length) {
+      const linhas = p.itens.map((item, ordem) => ({ folha_id: p.id, ordem, ...normalizarItemFolha(item) }))
+      const { error: e3 } = await supabase.from('folhas_pagamento_itens').insert(linhas)
+      if (e3) throw new Error(e3.message)
+    }
+    return { ok: true }
+  },
+
+  excluir: async (id: number) => {
+    const { error } = await supabase.from('folhas_pagamento').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  // PENDENTE: exportarExcel (abre um modelo .xlsx específico
+  // empacotado com o programa) e importarEspelhosPonto (extração de
+  // PDF por posição, feita em Node) ainda não foram portados pra
+  // web — precisam de mais trabalho (o modelo precisa virar um
+  // arquivo público servido pelo site; a extração de PDF precisa
+  // trocar pra versão de navegador do pdfjs). Avisar o usuário
+  // quando ele testar essa tela.
 }
 
 // NOVO: usado pelo Dashboard (Últimos Lançamentos) — mesma lógica de
