@@ -2637,20 +2637,21 @@ const documentosApi = {
   // quiser imprimir dali, é o próprio visualizador de PDF do
   // navegador que abre o diálogo, sem esse cabeçalho indesejado.
   imprimir: async (p: { html: string; landscape?: boolean; nomeArquivo?: string }) => {
-    const empresaId = useEmpresaStore.getState().empresaId
-    if (!empresaId) return { ok: false }
-    const resultado = await chamarServicoPdf('/api/gerar-pdf', {
-      html: p.html, landscape: p.landscape, nomeArquivo: p.nomeArquivo ?? 'documento',
-      pastaId: `DOC_${Date.now()}`, empresa_id: empresaId,
-    })
     try {
+      const empresaId = useEmpresaStore.getState().empresaId
+      if (!empresaId) { console.error('[imprimir] Sem empresaId na store.'); return { ok: false } }
+      const resultado = await chamarServicoPdf('/api/gerar-pdf', {
+        html: p.html, landscape: p.landscape, nomeArquivo: p.nomeArquivo ?? 'documento',
+        pastaId: `DOC_${Date.now()}`, empresa_id: empresaId,
+      })
       const blob = await baixarComoBlob(resultado.path)
       const url = URL.createObjectURL(blob)
       window.open(url, '_blank')
-    } catch {
+      return { ok: true }
+    } catch (erro) {
+      console.error('[imprimir] Falhou:', erro)
       return { ok: false }
     }
-    return { ok: true }
   },
 
   // NOVO: salva automaticamente (mesmo fluxo do desktop, chamado
