@@ -2625,6 +2625,41 @@ const documentosApi = {
     return { ok: true, filePath: resultado.path }
   },
 
+  // NOVO: usado pelo Painel do Supervisor (aprovação) — gera o
+  // documento com anexos e já baixa pro computador da pessoa (o
+  // desktop mostra um diálogo de "Salvar como", aqui vira download
+  // direto). O resultado (caminho no Storage) é usado em seguida por
+  // aplicarCarimbosAP/carimbarPrimeiraPagina (já funciona) — essa
+  // função só cuida de gerar e salvar, não carimba nada sozinha
+  // (evita carimbar duas vezes).
+  gerarPdfComAnexos: async (p: {
+    html: string; landscape?: boolean; nomeArquivo: string
+    anexos?: { caminho: string; vaiAssinatura?: boolean }[]
+    empresa_id?: number
+  }) => {
+    if (!p.empresa_id) throw new Error('empresa_id é obrigatório pra gerar o documento.')
+    const resultado = await chamarServicoPdf('/api/gerar-pdf', { ...p, pastaId: `DOC_${Date.now()}` })
+    try {
+      const blob = await baixarComoBlob(resultado.path)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `${p.nomeArquivo}.pdf`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(url)
+    } catch { /* o download é só uma cortesia — se falhar, o arquivo já está salvo no Storage mesmo assim */ }
+    return { ok: true, filePath: resultado.path }
+  },
+
+  // NOVO: no desktop, sobe um arquivo LOCAL pro Storage (depois de
+  // carimbar por cima com pdf-lib, que só sabe mexer em arquivo em
+  // disco). Na web não existe "arquivo local" nesse ponto do fluxo —
+  // o gerarPdfComAnexos acima já devolve direto o caminho no Storage
+  // (supabase://...), então aqui não tem nada pra fazer além de
+  // confirmar o mesmo caminho de volta.
+  subirPdfStorage: async (p: { caminhoLocal: string; empresaId: number; pastaId: string }) => {
+    return { ok: true, caminho: p.caminhoLocal }
+  },
+
   // NOVO: usado pela Nota Fiscal — só junta os anexos (nota e
   // boletos) em dois PDFs separados, sem gerar nenhum documento base
   // (por isso não manda "html").
