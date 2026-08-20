@@ -2780,4 +2780,64 @@ const contratosApi = {
   },
 }
 
-export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi, contratos: contratosApi }
+// NOVO: módulo Obra — Estrutura Analítica (EAP) — mesma lógica de
+// obraEap.ipc.ts. O peso (%) de cada item é sempre calculado na
+// tela a partir do valor orçado, nunca gravado aqui.
+interface ItemEapPayload {
+  id?: number; empresa_id: number | null; parent_id: number | null; nome: string
+  valor_orcado: number; unidade_medida: string | null; ordem: number
+  data_inicio_prevista?: string | null; data_fim_prevista?: string | null
+}
+const obraEapApi = {
+  listar: async (empresaId: number) => {
+    const { data, error } = await supabase.from('obra_eap_itens').select('*').eq('empresa_id', empresaId).order('ordem').order('id')
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+  listarModelo: async () => {
+    const { data, error } = await supabase.from('obra_eap_itens').select('*').is('empresa_id', null).order('ordem').order('id')
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+  criar: async (p: ItemEapPayload) => {
+    const { data, error } = await supabase.from('obra_eap_itens').insert({
+      empresa_id: p.empresa_id, parent_id: p.parent_id, nome: p.nome,
+      valor_orcado: p.valor_orcado, unidade_medida: p.unidade_medida, ordem: p.ordem,
+      data_inicio_prevista: p.data_inicio_prevista ?? null, data_fim_prevista: p.data_fim_prevista ?? null,
+    }).select('id').single()
+    if (error) throw new Error(error.message)
+    return { id: data.id }
+  },
+  atualizar: async (p: ItemEapPayload) => {
+    const { error } = await supabase.from('obra_eap_itens').update({
+      nome: p.nome, valor_orcado: p.valor_orcado, unidade_medida: p.unidade_medida, ordem: p.ordem,
+      data_inicio_prevista: p.data_inicio_prevista ?? null, data_fim_prevista: p.data_fim_prevista ?? null,
+    }).eq('id', p.id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  excluir: async (id: number) => {
+    // FK no banco já é ON DELETE CASCADE — apaga a árvore inteira embaixo sozinho
+    const { error } = await supabase.from('obra_eap_itens').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+  clonarModelo: async (empresaId: number) => {
+    const { data: modelo, error } = await supabase.from('obra_eap_itens').select('*').is('empresa_id', null).order('ordem').order('id')
+    if (error) throw new Error(error.message)
+    const mapaIds = new Map<number, number>()
+    for (const item of modelo ?? []) {
+      const novoParentId = item.parent_id ? mapaIds.get(item.parent_id) ?? null : null
+      const { data: novo, error: e2 } = await supabase.from('obra_eap_itens').insert({
+        empresa_id: empresaId, parent_id: novoParentId, nome: item.nome,
+        valor_orcado: item.valor_orcado, unidade_medida: item.unidade_medida, ordem: item.ordem,
+        data_inicio_prevista: item.data_inicio_prevista, data_fim_prevista: item.data_fim_prevista,
+      }).select('id').single()
+      if (e2) throw new Error(e2.message)
+      mapaIds.set(item.id, novo.id)
+    }
+    return { ok: true, quantidade: (modelo ?? []).length }
+  },
+}
+
+export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi, contratos: contratosApi, obraEap: obraEapApi }
