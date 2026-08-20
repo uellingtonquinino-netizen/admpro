@@ -1,10 +1,23 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import WebSocket from 'ws'
 import { createClient } from '@supabase/supabase-js'
 import { PDFDocument } from 'pdf-lib'
 import puppeteer from 'puppeteer-core'
 import chromium from '@sparticuz/chromium-min'
 import { juntarArquivosEmPdf, type AnexoParaMesclar, type Carimbo } from '../lib/pdfLogic.js'
 import { subirDocumentoBuffer } from '../lib/storage.js'
+
+// CORRIGIDO: tanto o puppeteer-core quanto o @supabase/supabase-js
+// esperam encontrar um "WebSocket" pronto no ambiente (padrão em
+// Node 22+, mas essa função roda em Node 20 — necessário por causa
+// do Chromium, ver comentário do package.json). O puppeteer-core já
+// sabe usar o pacote `ws` sozinho, mas o Supabase especificamente só
+// procura por WebSocket "global" — sem isso aqui, a criação do
+// cliente Supabase falhava com "native WebSocket not found", mesmo
+// com o pacote `ws` já instalado.
+if (!globalThis.WebSocket) {
+  globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket
+}
 
 // URL pública do "pacote" do Chromium — hospedado pelo próprio autor
 // da biblioteca no GitHub. Se um dia a versão do puppeteer-core mudar
