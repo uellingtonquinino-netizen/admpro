@@ -929,6 +929,124 @@ const importacaoApi = {
 
     return { ok: true, criados, atualizados, ignorados, total: linhas.length }
   },
+
+  // NOVO: importação de Produtos/Materiais do Almoxarifado — mesmo
+  // padrão da de colaboradores (seletor de arquivo e download do
+  // navegador, em vez de diálogo nativo). Mesma lógica de
+  // importacao.ipc.ts.
+  gerarModeloProdutos: async () => {
+    const XLSX = await import('xlsx')
+    const campos: { rotulo: string; campo: string }[] = [
+      { rotulo: 'Nome', campo: 'nome' }, { rotulo: 'Descrição', campo: 'descricao' },
+      { rotulo: 'Unidade', campo: 'unidade' }, { rotulo: 'Estoque atual', campo: 'estoque_atual' },
+      { rotulo: 'Estoque mínimo', campo: 'estoque_minimo' }, { rotulo: 'Valor unitário', campo: 'valor_unitario' },
+      { rotulo: 'Fornecedor (nome já cadastrado)', campo: 'fornecedor_nome' },
+      { rotulo: 'Alugado (Sim/Não)', campo: 'alugado' }, { rotulo: 'Valor do aluguel', campo: 'valor_aluguel' },
+      { rotulo: 'Período do aluguel', campo: 'aluguel_periodo' }, { rotulo: 'Vencimento do aluguel (AAAA-MM-DD)', campo: 'aluguel_vencimento' },
+    ]
+    const cabecalho = campos.map(c => c.rotulo)
+    const linhaExemplo = campos.map(c => {
+      if (c.campo === 'nome') return 'CAPACETE DE SEGURANÇA (exemplo — apague esta linha)'
+      if (c.campo === 'unidade') return 'UN'
+      if (c.campo === 'alugado') return 'Não'
+      return ''
+    })
+    const ws = XLSX.utils.aoa_to_sheet([cabecalho, linhaExemplo])
+    ws['!cols'] = cabecalho.map(h => ({ wch: Math.max(18, h.length) }))
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Produtos')
+    const arrayBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer
+    const blob = new Blob([arrayBuffer], { type: 'application/octet-stream' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'Modelo_Importacao_Produtos.xlsx'
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+    return { ok: true }
+  },
+
+  importarProdutos: async (p: { empresa_id: number }) => {
+    const arquivo = await selecionarArquivoNoNavegador('.xlsx,.xls')
+    if (!arquivo) return { ok: false, canceled: true }
+
+    const XLSX = await import('xlsx')
+    const buffer = await arquivo.arrayBuffer()
+    const wb = XLSX.read(buffer, { type: 'array', cellDates: true })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const linhas = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' })
+
+    const campos: { rotulo: string; campo: string; tipo?: 'numero' | 'booleano' | 'data' }[] = [
+      { rotulo: 'Nome', campo: 'nome' }, { rotulo: 'Descrição', campo: 'descricao' },
+      { rotulo: 'Unidade', campo: 'unidade' }, { rotulo: 'Estoque atual', campo: 'estoque_atual', tipo: 'numero' },
+      { rotulo: 'Estoque mínimo', campo: 'estoque_minimo', tipo: 'numero' }, { rotulo: 'Valor unitário', campo: 'valor_unitario', tipo: 'numero' },
+      { rotulo: 'Fornecedor (nome já cadastrado)', campo: 'fornecedor_nome' },
+      { rotulo: 'Alugado (Sim/Não)', campo: 'alugado', tipo: 'booleano' }, { rotulo: 'Valor do aluguel', campo: 'valor_aluguel', tipo: 'numero' },
+      { rotulo: 'Período do aluguel', campo: 'aluguel_periodo' }, { rotulo: 'Vencimento do aluguel (AAAA-MM-DD)', campo: 'aluguel_vencimento', tipo: 'data' },
+    ]
+    function converterLinha(linha: Record<string, unknown>): Record<string, unknown> {
+      const dados: Record<string, unknown> = {}
+      for (const { rotulo, campo, tipo } of campos) {
+        const bruto = linha[rotulo]
+        if (bruto === undefined || bruto === null || String(bruto).trim() === '') continue
+        if (tipo === 'booleano') {
+          const v = String(bruto).trim().toLowerCase()
+          dados[campo] = v === 'sim' || v === '1' || v === 'true' ? 1 : 0
+        } else if (tipo === 'numero') {
+          const n = Number(String(bruto).replace(',', '.'))
+          if (!Number.isNaN(n)) dados[campo] = n
+        } else if (tipo === 'data') {
+          if (bruto instanceof Date) dados[campo] = bruto.toISOString().slice(0, 10)
+          else {
+            const texto = String(bruto).trim()
+            const br = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(texto)
+            dados[campo] = br ? `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}` : texto
+          }
+        } else {
+          dados[campo] = String(bruto).trim()
+        }
+      }
+      return dados
+    }
+
+    let criados = 0, atualizados = 0, ignorados = 0
+    const [{ data: existentesRows, error: e1 }, { data: fornecedoresRows, error: e2 }, { data: produtosAtuais, error: e3 }] = await Promise.all([
+      supabase.from('produtos').select('id,nome').eq('empresa_id', p.empresa_id),
+      supabase.from('fornecedores').select('id,nome').eq('empresa_id', p.empresa_id),
+      supabase.from('produtos').select('codigo').eq('empresa_id', p.empresa_id),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    if (e3) throw new Error(e3.message)
+
+    const porNome = new Map((existentesRows ?? []).map(r => [r.nome.toUpperCase(), r.id]))
+    const fornecedorPorNome = new Map((fornecedoresRows ?? []).map(f => [f.nome.toUpperCase(), f.id]))
+    let proximoCodigo = Math.max(0, ...(produtosAtuais ?? []).map(pr => Number(pr.codigo.replace(/\D/g, '')) || 0)) + 1
+
+    for (const linha of linhas) {
+      const dados = converterLinha(linha)
+      if (!dados.nome) { ignorados++; continue }
+
+      if (dados.fornecedor_nome) {
+        const idFornecedor = fornecedorPorNome.get(String(dados.fornecedor_nome).toUpperCase())
+        dados.fornecedor_id = idFornecedor ?? null
+      }
+      delete dados.fornecedor_nome
+
+      const existenteId = porNome.get(String(dados.nome).toUpperCase())
+      if (existenteId) {
+        const { error } = await supabase.from('produtos').update(dados).eq('id', existenteId)
+        if (error) throw new Error(error.message)
+        atualizados++
+      } else {
+        const codigo = String(proximoCodigo++).padStart(3, '0')
+        const { error } = await supabase.from('produtos').insert({ ...dados, empresa_id: p.empresa_id, codigo })
+        if (error) throw new Error(error.message)
+        criados++
+      }
+    }
+
+    return { ok: true, criados, atualizados, ignorados, total: linhas.length }
+  },
 }
 
 // NOVO: usado pela busca global da Navbar — mesma lógica de
