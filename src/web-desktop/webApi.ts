@@ -2162,18 +2162,20 @@ const notasFiscaisApi = {
     empresa_id: number; numero_pedido?: string | null; data: string; numero_nf?: string | null
     data_emissao_nf?: string | null; fornecedor_id?: number | null; fornecedor_nome: string
     boletos: { valor: number; vencimento: string }[]
-    anexos_nota?: File[]; anexos_boletos?: File[]
+    anexos_nota?: string[]; anexos_boletos?: string[]
   }) => {
     const { data: notaId, error } = await supabase.rpc('criar_nota_fiscal', { p: { ...p, anexos_nota: undefined, anexos_boletos: undefined } })
     if (error) throw new Error(error.message)
-    const enviar = async (arquivos: File[], categoria: 'nota' | 'boleto') => {
-      for (let ordem = 0; ordem < arquivos.length; ordem++) {
-        const arquivo = arquivos[ordem]
-        const remoto = `${p.empresa_id}/notas-fiscais/${notaId}/${categoria}-${Date.now()}-${arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-        const { error: e2 } = await supabase.storage.from('documentos-rh').upload(remoto, arquivo)
+    // CORRIGIDO: os caminhos já chegam PRONTOS aqui (subidos antes
+    // pela tela, via prepararAnexoWeb — ver NotaFiscalModal.tsx) —
+    // só precisa vincular, sem subir de novo. Antes esperava File[]
+    // por engano, causando "Cannot read properties of undefined
+    // (reading 'replace')" porque cada elemento chegava como string,
+    // sem propriedade .name nenhuma.
+    const enviar = async (caminhos: string[], categoria: 'nota' | 'boleto') => {
+      for (let ordem = 0; ordem < caminhos.length; ordem++) {
+        const { error: e2 } = await supabase.from('notas_fiscais_anexos').insert({ nota_id: notaId, caminho: caminhos[ordem], categoria, ordem })
         if (e2) throw new Error(e2.message)
-        const { error: e3 } = await supabase.from('notas_fiscais_anexos').insert({ nota_id: notaId, caminho: `supabase://${remoto}`, categoria, ordem })
-        if (e3) throw new Error(e3.message)
       }
     }
     await enviar(p.anexos_nota ?? [], 'nota')
