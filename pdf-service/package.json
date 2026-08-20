@@ -1,0 +1,21 @@
+{
+  "name": "admpro-pdf-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serviço isolado, na Vercel, que gera PDF a partir de HTML (a mesma automação de carimbo/anexos que o desktop já faz, só que rodando no servidor em vez do computador). Projeto separado do app mobile de propósito — assim nenhum problema aqui afeta o mobile.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.x"
+  },
+  "dependencies": {
+    "@sparticuz/chromium-min": "^131.0.1",
+    "puppeteer-core": "^23.11.1",
+    "pdf-lib": "^1.17.1",
+    "@supabase/supabase-js": "^2.45.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@vercel/node": "^3.2.0",
+    "typescript": "^5.5.3"
+  }
+}
