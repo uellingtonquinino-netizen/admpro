@@ -2337,13 +2337,18 @@ async function chamarServicoPdf(caminho: string, corpo: Record<string, unknown>)
   return json
 }
 
-// Baixa um arquivo do Storage (via URL assinada) e devolve como Blob
-// — usado tanto pra abrir num aba nova quanto pra baixar de verdade.
+// Baixa um arquivo do Storage e devolve como Blob — usado tanto pra
+// abrir numa aba nova quanto pra baixar de verdade.
+// CORRIGIDO: o Supabase Storage às vezes devolve o Blob sem o tipo
+// MIME certo (ou genérico demais) — sem isso, o navegador não sabe
+// que é um PDF e mostra o conteúdo bruto (binário) como se fosse
+// texto, em vez de abrir o visualizador de PDF embutido dele.
 async function baixarComoBlob(caminhoStorage: string): Promise<Blob> {
   const semPrefixo = caminhoStorage.replace('supabase://documentos-rh/', '')
   const { data, error } = await supabase.storage.from('documentos-rh').download(semPrefixo)
   if (error || !data) throw new Error(error?.message ?? 'Arquivo não encontrado.')
-  return data
+  if (data.type === 'application/pdf') return data
+  return new Blob([data], { type: 'application/pdf' })
 }
 
 const documentosApi = {
