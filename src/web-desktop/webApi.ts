@@ -1103,32 +1103,143 @@ const fornecedoresApi = {
 // tinha suposto antes (notificacoes.vencimentoExperiencia, que
 // acabou não sendo usado por ninguém — deixei como está, não faz
 // mal ficar, só não é chamado).
+// CORRIGIDO: minha versão anterior de vencimentoExperiencia (feita
+// sem o arquivo original na mão, só pro sino de notificações) estava
+// incompleta — faltava o modo por período (inicio/fim), que a tela de
+// Relatórios de RH usa; o modo por "dias" (usado só pelo sino)
+// continua existindo. Substituída pela lógica real de
+// relatoriosRH.ipc.ts, e completado o resto do módulo.
 const relatoriosRHApi = {
-  vencimentoExperiencia: async (p: { empresa_id: number; dias: number }) => {
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-    const dataLimite = new Date(hoje); dataLimite.setDate(dataLimite.getDate() + p.dias)
-    const { data, error } = await supabase.from('colaboradores')
-      .select('id,nome,funcao,data_vencimento_experiencia')
-      .eq('empresa_id', p.empresa_id)
-      .neq('status', 'desligado')
-      .not('data_vencimento_experiencia', 'is', null)
-      .lte('data_vencimento_experiencia', dataLimite.toISOString().slice(0, 10))
-      .order('data_vencimento_experiencia')
+  colaboradoresAtivos: async (p: { empresa_id: number; funcao?: string; setor?: string; equipe?: string }) => {
+    let q = supabase.from('colaboradores').select('nome,matricula_esocial,funcao,setor,equipe,data_admissao,salario_base,telefone,cidade,estado').eq('empresa_id', p.empresa_id).eq('status', 'ativo').order('nome')
+    if (p.funcao) q = q.eq('funcao', p.funcao)
+    if (p.setor) q = q.eq('setor', p.setor)
+    if (p.equipe) q = q.eq('equipe', p.equipe)
+    const { data, error } = await q
     if (error) throw new Error(error.message)
-    return (data ?? []).map(c => {
-      const vencimento = new Date(`${c.data_vencimento_experiencia}T00:00:00`)
-      const dias_restantes = Math.round((vencimento.getTime() - hoje.getTime()) / 86400000)
-      return { ...c, dias_restantes }
+    return data
+  },
+
+  porAdmissao: async (p: { empresa_id: number; dataInicio: string; dataFim: string }) => {
+    const { data, error } = await supabase.from('colaboradores').select('nome,matricula_esocial,funcao,setor,equipe,data_admissao,status')
+      .eq('empresa_id', p.empresa_id).not('data_admissao', 'is', null).gte('data_admissao', p.dataInicio).lte('data_admissao', p.dataFim).order('data_admissao')
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  vencimentoExperiencia: async (p: { empresa_id: number; dias?: number; inicio?: string; fim?: string }) => {
+    let q = supabase.from('colaboradores').select('id,nome,funcao,setor,data_admissao,dias_experiencia,data_vencimento_experiencia')
+      .eq('empresa_id', p.empresa_id).eq('status', 'ativo').not('data_vencimento_experiencia', 'is', null)
+    if (p.inicio && p.fim) {
+      q = q.gte('data_vencimento_experiencia', p.inicio).lte('data_vencimento_experiencia', p.fim)
+    } else {
+      const limite = new Date(); limite.setDate(limite.getDate() + (p.dias ?? 30))
+      q = q.lte('data_vencimento_experiencia', limite.toISOString().slice(0, 10))
+    }
+    const { data, error } = await q.order('data_vencimento_experiencia')
+    if (error) throw new Error(error.message)
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+    return (data ?? []).map(c => ({ ...c, dias_restantes: Math.floor((new Date(`${c.data_vencimento_experiencia}T00:00:00`).getTime() - hoje.getTime()) / 86400000) }))
+  },
+
+  alojados: async (empresaId: number) => {
+    const { data, error } = await supabase.from('colaboradores').select('nome,funcao,setor,equipe,cidade,estado,telefone').eq('empresa_id', empresaId).eq('status', 'ativo').eq('alojado', 1).order('nome')
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  afastados: async (empresaId: number) => {
+    const { data, error } = await supabase.from('colaboradores').select('nome,funcao,setor,equipe,data_admissao').eq('empresa_id', empresaId).eq('status', 'afastado').order('nome')
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  inativos: async (empresaId: number) => {
+    const { data, error } = await supabase.from('colaboradores').select('nome,funcao,setor,data_admissao,data_demissao,tipo_demissao').eq('empresa_id', empresaId).eq('status', 'desligado').order('data_demissao', { ascending: false })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  aniversariantes: async (p: { empresa_id: number; mes?: number }) => {
+    const mes = p.mes ?? (new Date().getMonth() + 1)
+    const mesStr = String(mes).padStart(2, '0')
+    const { data, error } = await supabase.from('colaboradores').select('id,nome,funcao,setor,nascimento').eq('empresa_id', p.empresa_id).eq('status', 'ativo').not('nascimento', 'is', null)
+    if (error) throw new Error(error.message)
+    return (data ?? []).filter(c => c.nascimento.slice(5, 7) === mesStr).map(c => ({ ...c, dia: Number(c.nascimento.slice(8, 10)) })).sort((a, b) => a.dia - b.dia)
+  },
+
+  movimentacaoPeriodo: async (p: { empresa_id: number; inicio: string; fim: string }) => {
+    const [{ data: admissoes, error: e1 }, { data: demissoes, error: e2 }] = await Promise.all([
+      supabase.from('colaboradores').select('nome,funcao,setor,data:data_admissao').eq('empresa_id', p.empresa_id).gte('data_admissao', p.inicio).lte('data_admissao', p.fim).order('data_admissao'),
+      supabase.from('colaboradores').select('nome,funcao,setor,data:data_demissao,tipo_demissao').eq('empresa_id', p.empresa_id).not('data_demissao', 'is', null).gte('data_demissao', p.inicio).lte('data_demissao', p.fim).order('data_demissao'),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    return { admissoes, demissoes }
+  },
+
+  porSetor: async (p: { empresa_id: number; setor?: string }) => {
+    let q = supabase.from('colaboradores').select('nome,funcao,setor').eq('empresa_id', p.empresa_id).eq('status', 'ativo').order('setor').order('nome')
+    if (p.setor) q = q.eq('setor', p.setor)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  contasBancarias: async (p: { empresa_id: number; inicio?: string; fim?: string } | number) => {
+    const params = typeof p === 'number' ? { empresa_id: p } : p
+    let q = supabase.from('colaboradores').select('nome,cpf,banco,agencia,conta,conta_digito,tipo_conta').eq('empresa_id', params.empresa_id).eq('status', 'ativo').order('nome')
+    if (params.inicio && params.fim) q = q.gte('data_admissao', params.inicio).lte('data_admissao', params.fim)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    return data
+  },
+}
+
+// NOVO: usado na tela de Relatórios (financeiro) — mesma lógica de
+// relatorios.ipc.ts.
+const relatoriosApi = {
+  evolucaoMensal: async (p: { empresa_id: number; meses?: number }) => {
+    const meses = p.meses ?? 6
+    const { data, error } = await supabase.from('lancamentos').select('tipo,valor,status,data').eq('empresa_id', p.empresa_id).neq('status', 'cancelado')
+    if (error) throw new Error(error.message)
+    const hoje = new Date(); hoje.setDate(1)
+    const lista: string[] = []
+    for (let i = meses - 1; i >= 0; i--) {
+      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1)
+      lista.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    }
+    return lista.map(mes => {
+      const doMes = (data ?? []).filter(l => l.data.slice(0, 7) === mes)
+      return {
+        mes,
+        receitas: doMes.filter(l => l.tipo === 'receita').reduce((s, l) => s + Number(l.valor), 0),
+        despesas: doMes.filter(l => l.tipo === 'despesa').reduce((s, l) => s + Number(l.valor), 0),
+      }
     })
   },
 
-  aniversariantes: async (p: { empresa_id: number; mes: number }) => {
-    const mesBusca = String(p.mes).padStart(2, '0')
-    const { data, error } = await supabase.from('colaboradores')
-      .select('id,nome,funcao,nascimento').eq('empresa_id', p.empresa_id).neq('status', 'desligado')
+  topCategorias: async (p: { empresa_id: number; tipo: 'receita' | 'despesa'; dataInicio?: string; dataFim?: string; limite?: number }) => {
+    let q = supabase.from('lancamentos').select('valor,categoria_id').eq('empresa_id', p.empresa_id).eq('tipo', p.tipo).neq('status', 'cancelado')
+    if (p.dataInicio && p.dataFim) q = q.gte('data', p.dataInicio).lte('data', p.dataFim)
+    const { data, error } = await q
     if (error) throw new Error(error.message)
-    return (data ?? []).filter(c => c.nascimento?.slice(5, 7) === mesBusca)
-      .sort((a, b) => (a.nascimento ?? '').slice(8, 10).localeCompare((b.nascimento ?? '').slice(8, 10)))
+    const categoriaIds = [...new Set((data ?? []).map(l => l.categoria_id).filter(Boolean))]
+    let categoriasRows: any[] = []
+    if (categoriaIds.length) {
+      const r = await supabase.from('categorias').select('id,nome,cor').in('id', categoriaIds)
+      if (r.error) throw new Error(r.error.message)
+      categoriasRows = r.data ?? []
+    }
+    const nomes = new Map(categoriasRows.map(c => [c.id, c.nome]))
+    const cores = new Map(categoriasRows.map(c => [c.id, c.cor]))
+    const grupos = new Map<string, number>()
+    for (const l of data ?? []) {
+      const nome = nomes.get(l.categoria_id) ?? 'Sem categoria'
+      grupos.set(nome, (grupos.get(nome) ?? 0) + Number(l.valor))
+    }
+    return [...grupos].map(([categoria, total]) => ({ categoria, total, cor: cores.get(categoria) ?? null }))
+      .sort((a, b) => b.total - a.total).slice(0, p.limite ?? 10)
   },
 }
 
@@ -2207,4 +2318,4 @@ const supervisorApi = {
   },
 }
 
-export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi }
+export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi }
