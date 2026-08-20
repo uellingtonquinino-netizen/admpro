@@ -8,6 +8,7 @@ import { toast }         from '@components/ui/ToastContainer'
 import Badge             from '@components/ui/Badge'
 import ConfirmDialog      from '@components/ui/ConfirmDialog'
 import { gerarHtmlAP }   from '../documentos/ap'
+import { nomeExibicaoEmpresa } from '../documentos/base'
 import { gerarCapaLote, ApCapaItem } from '../documentos/capaLote'
 import { finalizarPdfAP } from '../utils/carimbosAp'
 import { formatCPF, formatCNPJ } from '../utils/documentValidators'
@@ -259,7 +260,7 @@ export default function PainelSupervisor() {
       }
 
       const html = gerarHtmlAP({
-        centroCusto:      empresaAtual.razao_social || empresaAtual.nome,
+        centroCusto:      nomeExibicaoEmpresa(empresaAtual),
         logoUrl:          empresaAtual.logo_url,
         beneficiarioNome: completa.beneficiario_nome,
         documento,

@@ -58,6 +58,19 @@ export function hoje(): string {
   return new Date().toLocaleDateString('pt-BR')
 }
 
+// NOVO: em qualquer lugar que hoje mostra só o nome da obra (ex:
+// "RESIDENCIAL TOP LIFE BAYEUX I"), passa a mostrar a razão social
+// primeiro, com o nome da obra entre parênteses — só quando os dois
+// existem e são diferentes. Sem razão social cadastrada, ou quando
+// os dois são iguais, mostra só o nome mesmo (sem repetir/duplicar
+// à toa).
+export function nomeExibicaoEmpresa(empresa: { nome: string; razao_social?: string | null }): string {
+  if (empresa.razao_social && empresa.razao_social.trim() && empresa.razao_social.trim() !== empresa.nome.trim()) {
+    return `${empresa.razao_social} (${empresa.nome})`
+  }
+  return empresa.nome
+}
+
 // Envolve o conteúdo de um documento com o CSS de impressão A4 e um
 // rodapé opcional de assinatura. `duasVias` repete o conteúdo duas
 // vezes na mesma página, como no modelo original de AP.

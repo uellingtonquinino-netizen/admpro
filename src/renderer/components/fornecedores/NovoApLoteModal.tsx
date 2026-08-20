@@ -159,9 +159,10 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
       // Já gera o documento na hora, pronto pra visualizar — mesmo
       // padrão da AP normal (se não aprovado ainda, sem carimbo).
       try {
+        const empresaAtual = await window.api.empresas.buscarPorId(empresa.id)
         const titulo = `Pagamento em Lote #${id}`
         const html = gerarCapaAPLote(
-          { nome: empresa.nome, logo_url: empresa.logo_url }, titulo, dataEmissao,
+          { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, dataEmissao,
           itens.map((i, idx) => ({
             numero: idx + 1, nome: i.nome, documento: i.documento, descricao: i.descricao,
             valor: Number(i.valor.toString().replace(',', '.')),

@@ -1,4 +1,4 @@
-import { documentoBase, fmtData, hoje, cabecalhoComLogo, chk, type ColaboradorDoc, type EmpresaDoc } from './base'
+import { documentoBase, fmtData, hoje, cabecalhoComLogo, chk, nomeExibicaoEmpresa, type ColaboradorDoc, type EmpresaDoc } from './base'
 import { numeroPorExtenso } from '../utils/numeroPorExtenso'
 import { formatCPF, formatCNPJ } from '../utils/documentValidators'
 import { proximoDiaUtil } from '../utils/proximoDiaUtil'
@@ -318,9 +318,9 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
         <div class="form-outer">
           ${cabecalhoComLogo('Guia de Autorização de Atendimento', empresa.logo_url)}
           <p style="font-weight:700;margin-bottom:2px;">
-            ${empresa.nome}${empresa.cnpj ? ` &nbsp;CNPJ: ${formatCNPJ(empresa.cnpj)}` : ''}
+            ${nomeExibicaoEmpresa(empresa)}${empresa.cnpj ? ` &nbsp;CNPJ: ${formatCNPJ(empresa.cnpj)}` : ''}
           </p>
-          <p style="margin-bottom:10px;">OBRA: ${empresa.endereco || empresa.nome}</p>
+          <p style="margin-bottom:10px;">OBRA: ${empresa.endereco || nomeExibicaoEmpresa(empresa)}</p>
 
           <p class="campo-linha"><label>COLABORADOR:</label> <span class="preenchido">${c.nome}</span></p>
           <div class="grid-3">
@@ -421,7 +421,7 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
             ${empresa.logo_url ? `<img src="${empresa.logo_url}" />` : ''}
             <div class="titulo">Movimentação de Pessoal</div>
             <div style="text-align:right;font-size:11px;">
-              <p><strong>Obra:</strong> ${empresa.nome}</p>
+              <p><strong>Obra:</strong> ${nomeExibicaoEmpresa(empresa)}</p>
               <p><strong>Data:</strong> ${hoje()}</p>
             </div>
           </div>
@@ -680,14 +680,14 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
         <p class="texto-corpo">
           Declaramos para os devidos fins que o(a) Sr.(ª) ${c.nome}, inscrito(a) no CPF sob o n°
           ${formatCPF(c.cpf) || '_______________'} e portador(a) do RG de n° ${c.rg ?? '_______________'}, é
-          funcionário(a) da empresa ${empresa.nome}${empresa.cnpj ? `, CNPJ ${formatCNPJ(empresa.cnpj)}` : ''},
+          funcionário(a) da empresa ${nomeExibicaoEmpresa(empresa)}${empresa.cnpj ? `, CNPJ ${formatCNPJ(empresa.cnpj)}` : ''},
           exercendo atividades de ${c.funcao ?? '_______________'}, cumprindo jornada de trabalho
           ${ex.jornada || '_______________'}, podendo ser convocado eventualmente para trabalhar aos
           sábados, sendo isto facultado ao mesmo.
         </p>
         <p style="margin-top:24px;">${ex.local || '_______________'} , ${hoje()}</p>
         <div class="assinaturas" style="margin-top:70px;">
-          <div class="assinatura">${empresa.nome}${empresa.cnpj ? ` — ${formatCNPJ(empresa.cnpj)}` : ''}</div>
+          <div class="assinatura">${nomeExibicaoEmpresa(empresa)}${empresa.cnpj ? ` — ${formatCNPJ(empresa.cnpj)}` : ''}</div>
         </div>
       `,
     }),
@@ -711,7 +711,7 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
             <div class="titulo" style="text-align:left;">Recibo de Pagamento</div>
             <div style="font-size:12pt;">N° <span class="preenchido" style="display:inline-block;min-width:40px;">${ex.numero ?? ''}</span></div>
           </div>
-          <p class="campo-linha" style="font-weight:600;">${empresa.nome}${empresa.cnpj ? ` — CNPJ: ${formatCNPJ(empresa.cnpj)}` : ''}</p>
+          <p class="campo-linha" style="font-weight:600;">${nomeExibicaoEmpresa(empresa)}${empresa.cnpj ? ` — CNPJ: ${formatCNPJ(empresa.cnpj)}` : ''}</p>
           <p class="campo-linha">
             <label>RECEBI (EMOS) DE:</label> <span class="preenchido">${c.nome}</span>
             <label>CPF</label> <span class="preenchido" style="flex:0.5;">${formatCPF(c.cpf) || '—'}</span>
@@ -782,7 +782,7 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
       corpoHtml: `
         ${cabecalhoComLogo('Comunicado de Dispensa de Funcionário ao Setor Pessoal', empresa.logo_url)}
         <table class="dados cols-ajustadas">
-          <tr><td class="label">Obra</td><td colspan="3">${empresa.nome}</td></tr>
+          <tr><td class="label">Obra</td><td colspan="3">${nomeExibicaoEmpresa(empresa)}</td></tr>
           <tr><td class="label">Código</td><td colspan="3">${c.matricula_esocial || '—'}</td></tr>
           <tr><td class="label">Nome</td><td colspan="3">${c.nome}</td></tr>
           <tr><td class="label">Função</td><td colspan="3">${c.funcao ?? '—'}</td></tr>
@@ -883,7 +883,7 @@ export const TIPOS_DOCUMENTO: TipoDocumento[] = [
 
           <table class="dados cols-ajustadas">
             <tr>
-              <td class="label">Empregador</td><td colspan="3">${empresa.razao_social || empresa.nome}</td>
+              <td class="label">Empregador</td><td colspan="3">${nomeExibicaoEmpresa(empresa)}</td>
             </tr>
             <tr>
               <td class="label">CNPJ</td><td>${empresa.cnpj ? formatCNPJ(empresa.cnpj) : '—'}</td>

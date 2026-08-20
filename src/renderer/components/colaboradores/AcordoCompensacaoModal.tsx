@@ -5,6 +5,7 @@ import Modal                    from '@components/ui/Modal'
 import Button                   from '@components/ui/Button'
 import Input                    from '@components/ui/Input'
 import { gerarHtmlAcordo }      from '../../documentos/acordo'
+import { nomeExibicaoEmpresa }  from '../../documentos/base'
 import { diaDaSemana }          from '../../utils/documentValidators'
 import { Search, FileText, Plus, Trash2 } from 'lucide-react'
 
@@ -122,11 +123,11 @@ export default function AcordoCompensacaoModal({ onClose }: Props) {
 
       const html = gerarHtmlAcordo({
         logoUrl:         empresaAtual.logo_url,
-        empresaNome:     empresaAtual.nome,
+        empresaNome:     nomeExibicaoEmpresa(empresaAtual),
         empresaCnpj:     empresaAtual.cnpj,
         empresaEndereco: empresaAtual.endereco,
         ramoAtividade,
-        obra:            obra || empresaAtual.nome,
+        obra:            obra || nomeExibicaoEmpresa(empresaAtual),
         cidadeObra,
         itens,
         local,

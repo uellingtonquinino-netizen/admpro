@@ -6,6 +6,7 @@ import Modal                from '@components/ui/Modal'
 import Button                from '@components/ui/Button'
 import Input                  from '@components/ui/Input'
 import { gerarHtmlSaidaAlmoxarifado } from '../../documentos/saidaAlmoxarifado'
+import { nomeExibicaoEmpresa } from '../../documentos/base'
 import { Search, FileText, Save, UserPlus, Plus, Trash2 } from 'lucide-react'
 
 interface ColaboradorResumo { id: number; nome: string; funcao?: string | null }
@@ -201,7 +202,7 @@ export default function NovaSaidaModal({ onClose, onSaved }: Props) {
 
       const html = gerarHtmlSaidaAlmoxarifado({
         logoUrl:            empresa.logo_url,
-        empresaNome:        empresa.nome,
+        empresaNome:        nomeExibicaoEmpresa(empresa),
         data,
         itens: itens.map(it => ({
           produtoCodigo: it.codigo.trim(),

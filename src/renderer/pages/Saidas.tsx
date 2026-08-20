@@ -12,6 +12,7 @@ import EmptyState            from '@components/ui/EmptyState'
 import NovaSaidaModal        from '@components/almoxarifado/NovaSaidaModal'
 import { formatDate }        from '@utils/format'
 import { gerarHtmlSaidaAlmoxarifado } from '../documentos/saidaAlmoxarifado'
+import { nomeExibicaoEmpresa } from '../documentos/base'
 import { Search, Plus, Trash2, Printer, PackageMinus as IconVazio } from 'lucide-react'
 
 interface ItemSaida {
@@ -77,7 +78,7 @@ export default function Saidas() {
       const produtos = await Promise.all(s.itens.map(it => window.api.produtos.buscarPorId(it.produto_id)))
       const html = gerarHtmlSaidaAlmoxarifado({
         logoUrl:           empresa.logo_url,
-        empresaNome:       empresa.nome,
+        empresaNome:       nomeExibicaoEmpresa(empresa),
         data:              s.data,
         itens: s.itens.map((it, i) => ({
           produtoCodigo: it.produto_codigo,

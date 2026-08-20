@@ -6,6 +6,7 @@ import Button                           from '@components/ui/Button'
 import Input                            from '@components/ui/Input'
 import Select                           from '@components/ui/Select'
 import { gerarHtmlAP }                  from '../../documentos/ap'
+import { nomeExibicaoEmpresa }          from '../../documentos/base'
 import { formatCPF, formatCNPJ }        from '../../utils/documentValidators'
 import FornecedorModal                  from './FornecedorModal'
 import { Search, FileText, Plus, Trash2, Save, Paperclip, ChevronUp, ChevronDown, FileSignature } from 'lucide-react'
@@ -195,7 +196,7 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
         : `CPF: ${formatCPF(selecionado.cpf) || '—'}`
 
       const html = gerarHtmlAP({
-        centroCusto:      empresaAtual.razao_social || empresaAtual.nome,
+        centroCusto:      nomeExibicaoEmpresa(empresaAtual),
         logoUrl:          empresaAtual.logo_url,
         beneficiarioNome: selecionado.nome,
         documento,
@@ -351,7 +352,7 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
       }))
 
       const html = gerarHtmlAP({
-        centroCusto:      empresaAtual.razao_social || empresaAtual.nome,
+        centroCusto:      nomeExibicaoEmpresa(empresaAtual),
         logoUrl:          empresaAtual.logo_url,
         beneficiarioNome: selecionado.nome,
         documento,

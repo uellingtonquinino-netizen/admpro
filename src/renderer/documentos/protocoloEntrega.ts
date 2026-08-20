@@ -1,4 +1,4 @@
-import { documentoBase, cabecalhoComLogo, hoje, type ColaboradorDoc, type EmpresaDoc } from './base'
+import { documentoBase, cabecalhoComLogo, hoje, nomeExibicaoEmpresa, type ColaboradorDoc, type EmpresaDoc } from './base'
 import { formatCPF } from '../utils/documentValidators'
 
 export interface DadosProtocolo {
@@ -40,7 +40,7 @@ export function gerarBlocoProtocolo(c: ColaboradorDoc, empresa: EmpresaDoc, d: D
       <p class="campo-linha"><label>CPF:</label> <span class="preenchido">${formatCPF(c.cpf) || '—'}</span></p>
 
       <p class="texto-corpo" style="margin:10px 0;">
-        Declaro ter recebido da ${empresa.razao_social || empresa.nome} dia ${dataEntrega},
+        Declaro ter recebido da ${nomeExibicaoEmpresa(empresa)} dia ${dataEntrega},
         <strong>${d.quantidade} ${d.item}</strong> no valor unitário de <strong>${formatMoeda(d.valorUnitario)}</strong>
         para uso pessoal no canteiro de obras e estou ciente de que sou responsável pela sua guarda e
         conservação, e que a não devolução do(s) mesmo(s) quando solicitado pela empresa acarretará no

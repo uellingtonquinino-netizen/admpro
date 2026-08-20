@@ -1,8 +1,8 @@
-import { documentoBase, cabecalhoComLogo, fmtData, hoje } from './base'
-import { formatCPF, formatCNPJ } from '../utils/documentValidators'
+import { documentoBase, cabecalhoComLogo, fmtData, hoje, nomeExibicaoEmpresa } from './base'
 
 interface EmpresaInfo {
   nome: string
+  razao_social?: string | null
   logo_url?: string | null
 }
 
@@ -86,7 +86,7 @@ export function gerarCapaLote(empresa: EmpresaInfo, tituloLote: string, itens: A
       </style>
       ${cabecalhoComLogo(tituloLote, empresa.logo_url)}
       <p style="text-align:center;color:#555;margin-top:-6px;margin-bottom:14px;">
-        ${empresa.nome} &nbsp;•&nbsp; ${itens.length} AP(s) &nbsp;•&nbsp; Emitido em ${hoje()}
+        ${nomeExibicaoEmpresa(empresa)} &nbsp;•&nbsp; ${itens.length} AP(s) &nbsp;•&nbsp; Emitido em ${hoje()}
       </p>
       ${corpo}
     `,
@@ -168,7 +168,7 @@ export function gerarCapaAPLote(
       </style>
       ${cabecalhoComLogo(titulo, empresa.logo_url)}
       <p style="text-align:center;color:#555;margin-top:-6px;margin-bottom:14px;">
-        ${empresa.nome} &nbsp;•&nbsp; Emissão ${fmtData(dataEmissao)} &nbsp;•&nbsp; ${itens.length} beneficiário(s) &nbsp;•&nbsp; Emitido em ${hoje()}
+        ${nomeExibicaoEmpresa(empresa)} &nbsp;•&nbsp; Emissão ${fmtData(dataEmissao)} &nbsp;•&nbsp; ${itens.length} beneficiário(s) &nbsp;•&nbsp; Emitido em ${hoje()}
       </p>
       ${corpo}
     `,

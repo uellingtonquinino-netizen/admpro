@@ -1,7 +1,8 @@
-import { documentoBase, cabecalhoComLogo, fmtData, hoje } from './base'
+import { documentoBase, cabecalhoComLogo, fmtData, hoje, nomeExibicaoEmpresa } from './base'
 
 interface EmpresaInfo {
   nome: string
+  razao_social?: string | null
   logo_url?: string | null
 }
 
@@ -38,7 +39,7 @@ function envolver(titulo: string, empresa: EmpresaInfo, subtitulo: string, corpo
       </style>
       ${cabecalhoComLogo(titulo, empresa.logo_url)}
       <p style="text-align:center;color:#555;margin-top:-6px;margin-bottom:14px;">
-        ${empresa.nome} &nbsp;•&nbsp; ${subtitulo} &nbsp;•&nbsp; Emitido em ${hoje()}
+        ${nomeExibicaoEmpresa(empresa)} &nbsp;•&nbsp; ${subtitulo} &nbsp;•&nbsp; Emitido em ${hoje()}
       </p>
       ${corpo}
     `,

@@ -5,6 +5,7 @@ import Modal         from '@components/ui/Modal'
 import Button        from '@components/ui/Button'
 import Input         from '@components/ui/Input'
 import { gerarHtmlAP }           from '../../documentos/ap'
+import { nomeExibicaoEmpresa }   from '../../documentos/base'
 import { formatCPF, formatCNPJ } from '../../utils/documentValidators'
 import { Plus, Trash2, Paperclip, ChevronUp, ChevronDown } from 'lucide-react'
 
@@ -198,7 +199,7 @@ export default function EditarApModal({ registro, onClose, onSaved }: Props) {
       }
 
       const html = gerarHtmlAP({
-        centroCusto:      empresaAtual.razao_social || empresaAtual.nome,
+        centroCusto:      nomeExibicaoEmpresa(empresaAtual),
         logoUrl:          empresaAtual.logo_url,
         beneficiarioNome: nome,
         documento,

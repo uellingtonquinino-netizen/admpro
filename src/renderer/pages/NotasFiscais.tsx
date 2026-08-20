@@ -312,7 +312,7 @@ export default function NotasFiscais() {
       const empresaAtual = await window.api.empresas.buscarPorId(empresaId)
       const titulo = `PROTOCOLO DE NOTAS FISCAIS de ${formatDate(dataInicio)} a ${formatDate(dataFim)}`
       const html = gerarCapaNotasFiscais(
-        { nome: empresaAtual.nome, logo_url: empresaAtual.logo_url }, titulo, itens, format,
+        { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, itens, format,
       )
       const resultado = await window.api.documentos.imprimir({ html, nomeArquivo: titulo, landscape: true })
       if (!resultado.ok && !resultado.canceled) toast.error('Erro ao gerar a capa.')

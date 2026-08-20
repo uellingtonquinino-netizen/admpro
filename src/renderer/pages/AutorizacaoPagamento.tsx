@@ -395,7 +395,7 @@ export default function AutorizacaoPagamento() {
         const empresaAtual = await window.api.empresas.buscarPorId(empresaId)
         const titulo = `Pagamento em Lote #${lote.id}`
         const html = gerarCapaAPLote(
-          { nome: empresaAtual.nome, logo_url: empresaAtual.logo_url }, titulo, completo.data_emissao,
+          { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, completo.data_emissao,
           completo.itens.map((i: any, idx: number) => ({
             numero: idx + 1, nome: i.nome, documento: i.documento, descricao: i.descricao,
             valor: i.valor, banco: i.banco, agencia: i.agencia, operacao: i.operacao, conta: i.conta, tipo_conta: i.tipo_conta,
@@ -516,7 +516,7 @@ export default function AutorizacaoPagamento() {
       const empresaAtual = await window.api.empresas.buscarPorId(empresaId)
       const titulo = `PROTOCOLO DE AP's de ${formatDate(dataInicio)} a ${formatDate(dataFim)}`
       const html = gerarCapaLote(
-        { nome: empresaAtual.nome, logo_url: empresaAtual.logo_url }, titulo, itens, format,
+        { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, itens, format,
       )
       const resultado = await window.api.documentos.imprimir({ html, nomeArquivo: titulo, landscape: true })
       if (!resultado.ok && !resultado.canceled) toast.error('Erro ao gerar a capa.')
