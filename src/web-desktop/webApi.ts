@@ -910,13 +910,143 @@ const importacaoApi = {
 // NOVO: usado pela busca global da Navbar — mesma lógica de
 // produtos.ipc.ts / fornecedores.ipc.ts (só a listagem por
 // enquanto).
+// NOVO: usado no módulo de Almoxarifado (Estoque, cadastro de
+// material/ferramenta, relatórios) — mesma lógica de produtos.ipc.ts.
+interface ProdutoPayload {
+  empresa_id: number; codigo: string; nome: string; descricao?: string | null; unidade?: string | null
+  categoria?: string | null; estoque_atual?: number; estoque_minimo?: number; valor_unitario?: number
+  fornecedor_id?: number | null; alugado?: boolean; valor_aluguel?: number | null
+  aluguel_periodo?: string | null; aluguel_vencimento?: string | null
+}
+function normalizarProduto(p: ProdutoPayload) {
+  return {
+    ...p, descricao: p.descricao ?? null, unidade: p.unidade ?? null, categoria: p.categoria ?? null,
+    estoque_atual: p.estoque_atual ?? 0, estoque_minimo: p.estoque_minimo ?? 0, valor_unitario: p.valor_unitario ?? 0,
+    fornecedor_id: p.fornecedor_id ?? null, alugado: p.alugado ? 1 : 0,
+    valor_aluguel: p.alugado ? p.valor_aluguel ?? null : null,
+    aluguel_periodo: p.alugado ? p.aluguel_periodo ?? null : null,
+    aluguel_vencimento: p.alugado ? p.aluguel_vencimento ?? null : null,
+  }
+}
 const produtosApi = {
-  listar: async (p: { empresa_id: number; busca?: string }) => {
+  listar: async (p: { empresa_id: number; busca?: string; categoria?: string }) => {
     let query = supabase.from('produtos').select('*').eq('empresa_id', p.empresa_id).order('nome')
     if (p.busca) query = query.ilike('nome', `%${p.busca.replace(/[%_]/g, '\\$&')}%`)
+    if (p.categoria) query = query.eq('categoria', p.categoria)
     const { data, error } = await query
     if (error) throw new Error(error.message)
     return data ?? []
+  },
+
+  categorias: async (empresaId: number) => {
+    const { data, error } = await supabase.from('produtos').select('categoria').eq('empresa_id', empresaId).not('categoria', 'is', null)
+    if (error) throw new Error(error.message)
+    return [...new Set((data ?? []).map(r => r.categoria).filter((v): v is string => !!v && v !== ''))].sort()
+  },
+
+  buscarPorCodigo: async (p: { empresa_id: number; codigo: string }) => {
+    const { data, error } = await supabase.from('produtos').select('*').eq('empresa_id', p.empresa_id).eq('codigo', p.codigo).maybeSingle()
+    if (error) throw new Error(error.message)
+    return data ?? null
+  },
+
+  buscarPorId: async (id: number) => {
+    const { data, error } = await supabase.from('produtos').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    return data ?? null
+  },
+
+  resumo: async (empresaId: number) => {
+    const { data, error } = await supabase.from('produtos').select('id,codigo,nome,estoque_atual,estoque_minimo,unidade,valor_unitario').eq('empresa_id', empresaId)
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    return {
+      zerados: rows.filter(x => Number(x.estoque_atual) <= 0).sort((a, b) => a.nome.localeCompare(b.nome)),
+      acabando: rows.filter(x => Number(x.estoque_atual) > 0 && Number(x.estoque_atual) <= Number(x.estoque_minimo)).sort((a, b) => Number(a.estoque_atual) - Number(b.estoque_atual)),
+      valorTotal: rows.reduce((s, x) => s + Number(x.estoque_atual) * Number(x.valor_unitario), 0),
+    }
+  },
+
+  listarComMovimentacao: async (p: { empresa_id: number; dataInicio?: string; dataFim?: string }) => {
+    const [{ data: produtos, error: e1 }, { data: itens, error: e2 }, { data: itensSaida, error: e3 }] = await Promise.all([
+      supabase.from('produtos').select('id,codigo,nome,descricao,unidade,estoque_atual').eq('empresa_id', p.empresa_id).order('nome'),
+      supabase.from('almoxarifado_entradas_itens').select('produto_id,almoxarifado_entradas(data)').eq('almoxarifado_entradas.empresa_id', p.empresa_id),
+      supabase.from('almoxarifado_saidas_itens').select('produto_id,almoxarifado_saidas(data,empresa_id)'),
+    ])
+    for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+    const dentro = (d: string) => !p.dataInicio || !p.dataFim || (d >= p.dataInicio && d <= p.dataFim)
+    const saidasDaObra = (itensSaida ?? []).filter((x: any) => x.almoxarifado_saidas?.empresa_id === p.empresa_id)
+    return (produtos ?? []).map(pr => ({
+      ...pr,
+      ultima_entrada: (itens ?? []).filter((i: any) => i.produto_id === pr.id && i.almoxarifado_entradas?.data && dentro(i.almoxarifado_entradas.data)).map((i: any) => i.almoxarifado_entradas.data).sort().at(-1) ?? null,
+      ultima_saida: saidasDaObra.filter((x: any) => x.produto_id === pr.id && x.almoxarifado_saidas?.data && dentro(x.almoxarifado_saidas.data)).map((x: any) => x.almoxarifado_saidas.data).sort().at(-1) ?? null,
+    }))
+  },
+
+  movimentacao: async (p: { produto_id: number; dataInicio?: string; dataFim?: string }) => {
+    const [{ data: itens, error: e1 }, { data: itensSaida, error: e2 }] = await Promise.all([
+      supabase.from('almoxarifado_entradas_itens').select('quantidade,entrada_id,almoxarifado_entradas(data,fornecedor_nome,numero_nota)').eq('produto_id', p.produto_id),
+      supabase.from('almoxarifado_saidas_itens').select('quantidade,saida_id,almoxarifado_saidas(data,retirado_por_nome,setor)').eq('produto_id', p.produto_id),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    const dentro = (d: string) => !p.dataInicio || !p.dataFim || (d >= p.dataInicio! && d <= p.dataFim!)
+    return [
+      ...(itens ?? []).map((i: any) => ({ tipo: 'entrada', data: i.almoxarifado_entradas?.data, quantidade: i.quantidade, pessoa: i.almoxarifado_entradas?.fornecedor_nome, referencia: i.almoxarifado_entradas?.numero_nota })),
+      ...(itensSaida ?? []).map((x: any) => ({ tipo: 'saida', data: x.almoxarifado_saidas?.data, quantidade: x.quantidade, pessoa: x.almoxarifado_saidas?.retirado_por_nome, referencia: x.almoxarifado_saidas?.setor })),
+    ].filter(x => x.data && dentro(x.data)).sort((a, b) => b.data.localeCompare(a.data))
+  },
+
+  porFaixaEstoque: async (p: { empresa_id: number; min: number; max: number }) => {
+    const { data, error } = await supabase.from('produtos').select('codigo,nome,unidade,estoque_atual,valor_unitario').eq('empresa_id', p.empresa_id).gte('estoque_atual', p.min).lte('estoque_atual', p.max).order('estoque_atual')
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+
+  proximoCodigo: async (empresaId: number) => {
+    const { data, error } = await supabase.from('produtos').select('codigo').eq('empresa_id', empresaId)
+    if (error) throw new Error(error.message)
+    const maior = Math.max(0, ...(data ?? []).map(p => Number(p.codigo.replace(/\D/g, '')) || 0))
+    return { codigo: String(maior + 1).padStart(3, '0') }
+  },
+
+  criar: async (p: ProdutoPayload) => {
+    const { data, error } = await supabase.from('produtos').insert(normalizarProduto(p)).select('id').single()
+    if (error) throw new Error(error.message)
+    return { id: data.id }
+  },
+
+  atualizar: async (p: ProdutoPayload & { id: number }) => {
+    const { id, ...dados } = p
+    const { error } = await supabase.from('produtos').update(normalizarProduto(dados as ProdutoPayload)).eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  alugados: async (p: { empresa_id: number; vencimentoInicio?: string; vencimentoFim?: string }) => {
+    let q = supabase.from('produtos').select('codigo,nome,unidade,valor_aluguel,aluguel_periodo,aluguel_vencimento,fornecedor_id').eq('empresa_id', p.empresa_id).eq('alugado', 1).order('aluguel_vencimento')
+    if (p.vencimentoInicio && p.vencimentoFim) q = q.gte('aluguel_vencimento', p.vencimentoInicio).lte('aluguel_vencimento', p.vencimentoFim)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    const ids = [...(data ?? []).map(x => x.fornecedor_id).filter((x): x is number => x !== null)]
+    let fornecedoresRows: any[] = []
+    if (ids.length) {
+      const r = await supabase.from('fornecedores').select('id,nome').in('id', ids)
+      if (r.error) throw new Error(r.error.message)
+      fornecedoresRows = r.data ?? []
+    }
+    const nomes = new Map(fornecedoresRows.map(f => [f.id, f.nome]))
+    return (data ?? []).map(x => ({ ...x, fornecedor_nome: nomes.get(x.fornecedor_id) ?? null }))
+  },
+
+  excluir: async (id: number) => {
+    const { data: produto } = await supabase.from('produtos').select('nome,codigo,empresa_id').eq('id', id).single()
+    if (produto) {
+      await supabase.rpc('registrar_exclusao', { p_tabela: 'produtos', p_registro_id: id, p_descricao: `Material/Ferramenta - ${produto.nome} (código ${produto.codigo})`, p_empresa_id: produto.empresa_id })
+    }
+    const { error } = await supabase.from('produtos').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
   },
 }
 
