@@ -57,6 +57,32 @@ async function chamarAdminUsuarios(body: Record<string, unknown>) {
   return data
 }
 
+// NOVO: usada em qualquer lugar que recebe anexos vindos de
+// EmitirAPModal.tsx (ou telas parecidas) — cada anexo chega como
+// {caminho, vaiAssinatura, arquivo?}. No desktop, `caminho` já é um
+// caminho de arquivo local de verdade; na web, `.path` não existe
+// (bloqueado por segurança do navegador), então o componente manda o
+// próprio arquivo (File) em `arquivo` — essa função garante que todo
+// anexo vire um endereço válido do Storage antes de seguir, subindo
+// o que precisar subir.
+async function garantirAnexosCaminhoStorage(
+  empresaId: number, pastaId: string,
+  anexos: { caminho: string; vaiAssinatura?: boolean; arquivo?: File }[]
+): Promise<{ caminho: string; vaiAssinatura?: boolean }[]> {
+  const resultado: { caminho: string; vaiAssinatura?: boolean }[] = []
+  for (const a of anexos) {
+    if (a.arquivo) {
+      const remoto = `${empresaId}/${pastaId}/${Date.now()}-${a.arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+      const { error } = await supabase.storage.from('documentos-rh').upload(remoto, a.arquivo)
+      if (error) throw new Error(error.message)
+      resultado.push({ caminho: `supabase://documentos-rh/${remoto}`, vaiAssinatura: a.vaiAssinatura })
+    } else {
+      resultado.push({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })
+    }
+  }
+  return resultado
+}
+
 const usuarios = {
   login: async (p: { email: string; senha: string }) => {
     const { error } = await supabase.auth.signInWithPassword({ email: p.email.trim(), password: p.senha })
@@ -1483,17 +1509,15 @@ const apApi = {
     empresa_id: number; beneficiario_tipo: 'fornecedor' | 'colaborador'; beneficiario_id: number
     beneficiario_nome: string; descricao?: string | null; boletos: { valor: number; vencimento: string }[]
     observacoes?: string | null; solicitante?: string | null; autorizado_por?: string | null
-    anexos?: File[]
+    anexos?: { caminho: string; vaiAssinatura?: boolean; arquivo?: File }[]
   }) => {
     const { data: apId, error } = await supabase.rpc('criar_ap', { p: { ...p, anexos: undefined } })
     if (error) throw new Error(error.message)
-    for (let ordem = 0; ordem < (p.anexos?.length ?? 0); ordem++) {
-      const arquivo = p.anexos![ordem]
-      const remoto = `${p.empresa_id}/autorizacoes-pagamento/${apId}/${Date.now()}-${arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-      const { error: e2 } = await supabase.storage.from('documentos-rh').upload(remoto, arquivo)
+    if (p.anexos?.length) {
+      const prontos = await garantirAnexosCaminhoStorage(p.empresa_id, `autorizacoes-pagamento/${apId}`, p.anexos)
+      const linhas = prontos.map((a, ordem) => ({ ap_id: apId, caminho: a.caminho, ordem }))
+      const { error: e2 } = await supabase.from('autorizacoes_pagamento_anexos').insert(linhas)
       if (e2) throw new Error(e2.message)
-      const { error: e3 } = await supabase.from('autorizacoes_pagamento_anexos').insert({ ap_id: apId, caminho: `supabase://${remoto}`, ordem })
-      if (e3) throw new Error(e3.message)
     }
     return { id: apId }
   },
@@ -2617,11 +2641,17 @@ const documentosApi = {
   // serviço de PDF, que já sobe pro Storage sozinho.
   salvarPdfInterno: async (p: {
     html: string; landscape?: boolean; nomeArquivo: string; pastaId: string; empresa_id?: number
-    anexos?: { caminho: string; vaiAssinatura?: boolean }[]
+    anexos?: { caminho: string; vaiAssinatura?: boolean; arquivo?: File }[]
     carimbos?: { aprovadoPor: string; aprovadoEm: string; carimboBase64?: string | null; posicao: 'inferior-esquerdo' | 'inferior-direito' }[]
   }) => {
     if (!p.empresa_id) throw new Error('empresa_id é obrigatório pra salvar o documento.')
-    const resultado = await chamarServicoPdf('/api/gerar-pdf', p)
+    // CORRIGIDO: anexos vindos do formulário podem trazer o arquivo
+    // de verdade (File, rodando na web) em vez de um caminho pronto
+    // — precisa subir ANTES de mandar pro serviço de PDF (que só
+    // sabe lidar com endereço do Storage, não recebe arquivo bruto
+    // numa requisição JSON).
+    const anexosProntos = p.anexos?.length ? await garantirAnexosCaminhoStorage(p.empresa_id, p.pastaId, p.anexos) : undefined
+    const resultado = await chamarServicoPdf('/api/gerar-pdf', { ...p, anexos: anexosProntos })
     return { ok: true, filePath: resultado.path }
   },
 
@@ -2634,11 +2664,13 @@ const documentosApi = {
   // (evita carimbar duas vezes).
   gerarPdfComAnexos: async (p: {
     html: string; landscape?: boolean; nomeArquivo: string
-    anexos?: { caminho: string; vaiAssinatura?: boolean }[]
+    anexos?: { caminho: string; vaiAssinatura?: boolean; arquivo?: File }[]
     empresa_id?: number
   }) => {
     if (!p.empresa_id) throw new Error('empresa_id é obrigatório pra gerar o documento.')
-    const resultado = await chamarServicoPdf('/api/gerar-pdf', { ...p, pastaId: `DOC_${Date.now()}` })
+    const pastaId = `DOC_${Date.now()}`
+    const anexosProntos = p.anexos?.length ? await garantirAnexosCaminhoStorage(p.empresa_id, pastaId, p.anexos) : undefined
+    const resultado = await chamarServicoPdf('/api/gerar-pdf', { ...p, anexos: anexosProntos, pastaId })
     try {
       const blob = await baixarComoBlob(resultado.path)
       const url = URL.createObjectURL(blob)

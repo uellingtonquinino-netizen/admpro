@@ -29,6 +29,11 @@ interface Anexo {
   nome:    string
   caminho: string
   vaiAssinatura: boolean
+  // NOVO: só existe rodando na web — no desktop, `caminho` já é o
+  // caminho de arquivo local de verdade (`.path`, exclusivo do
+  // Electron); no navegador isso não existe por segurança, então
+  // guarda o arquivo em si aqui, pra poder subir ele depois.
+  arquivo?: File
 }
 
 const BOLETO_VAZIO: Boleto = { valor: '', vencimento: '' }
@@ -230,7 +235,7 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
         solicitante,
         autorizado_por:     autorizadoPor,
         data_emissao:       dataEmissao,
-        anexos:             anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
+        anexos:             anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura, arquivo: a.arquivo })),
       })
 
       // Se tem anexos, salva uma cópia pronta (AP + anexos já
@@ -259,7 +264,7 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
       const resultado = await window.api.documentos.salvarPdfInterno({
         html,
         nomeArquivo: `AP - ${selecionado?.nome ?? ''}`,
-        anexos:      anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
+        anexos:      anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura, arquivo: a.arquivo })),
         pastaId:     `AP_${apId}`,
         empresa_id:  empresa?.id,
       })
@@ -280,11 +285,21 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
   // ── Anexos (nota/recibo, boletos, medição etc.) ─────────
   function handleSelecionarArquivos(e: React.ChangeEvent<HTMLInputElement>) {
     const arquivos = Array.from(e.target.files ?? [])
-    const novos: Anexo[] = arquivos.map(f => ({
-      nome:    f.name,
-      caminho: (f as unknown as { path: string }).path,
-      vaiAssinatura: false,
-    }))
+    const novos: Anexo[] = arquivos.map(f => {
+      // CORRIGIDO: `.path` só existe no Electron — no navegador vem
+      // undefined (por segurança, nenhum site pode saber onde um
+      // arquivo está no computador da pessoa). Sem isso, o anexo
+      // ficava com um caminho vazio, sem dar erro nenhum na hora —
+      // só na hora de tentar usar ele depois. Guarda o arquivo em si
+      // como reserva, pra rodando na web ainda funcionar certinho.
+      const caminhoLocal = (f as unknown as { path?: string }).path
+      return {
+        nome: f.name,
+        caminho: caminhoLocal ?? f.name,
+        vaiAssinatura: false,
+        arquivo: caminhoLocal ? undefined : f,
+      }
+    })
     setAnexos(prev => [...prev, ...novos])
     e.target.value = ''
   }
@@ -353,7 +368,7 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
       const result = await window.api.documentos.gerarPdfComAnexos({
         html,
         nomeArquivo: `AP - ${selecionado.nome}`,
-        anexos:      anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
+        anexos:      anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura, arquivo: a.arquivo })),
       })
 
       if (result.canceled) return
@@ -370,7 +385,7 @@ export default function EmitirAPModal({ onClose, beneficiarioInicial }: Props) {
         solicitante,
         autorizado_por:     autorizadoPor,
         data_emissao:       dataEmissao,
-        anexos:             anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura })),
+        anexos:             anexos.map(a => ({ caminho: a.caminho, vaiAssinatura: a.vaiAssinatura, arquivo: a.arquivo })),
       })
       // Vincula o arquivo que já foi gerado/salvo — evita gerar de
       // novo, reaproveita o mesmo PDF que o usuário acabou de escolher
