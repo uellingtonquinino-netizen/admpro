@@ -214,6 +214,30 @@ const usuarios = {
     const data = await chamarAdminUsuarios({ acao: 'criar', ...p })
     return { id: data.id }
   },
+
+  // NOVO: usado pelo Master (lista de todos os usuários, de todas as
+  // obras) — mesma lógica de usuarios.supabase.ipc.ts.
+  listarTodos: async () => {
+    const { data: usuariosRows, error } = await supabase
+      .from('usuarios').select('id,empresa_id,nome,email,perfil,ativo,created_at,last_login_at,carimbo_url,empresas(nome)').order('nome')
+    if (error) throw new Error(error.message)
+    return Promise.all((usuariosRows ?? []).map(async (usuario: any) => {
+      const [extras, supervisor, obras] = await Promise.all([
+        supabase.from('usuario_permissoes_extras').select('chave,negada').eq('usuario_id', usuario.id),
+        supabase.from('supervisor_obras').select('empresa_id').eq('usuario_id', usuario.id),
+        supabase.from('usuario_obras').select('empresa_id').eq('usuario_id', usuario.id),
+      ])
+      for (const r of [extras, supervisor, obras]) if (r.error) throw new Error(r.error.message)
+      const { empresas, ...resto } = usuario
+      return {
+        ...resto, empresa_nome: empresas?.nome ?? '—',
+        permissoes_extras: (extras.data ?? []).filter((x: any) => !x.negada).map((x: any) => x.chave),
+        permissoes_negadas: (extras.data ?? []).filter((x: any) => !!x.negada).map((x: any) => x.chave),
+        obras_supervisor: (supervisor.data ?? []).map((x: any) => x.empresa_id),
+        obras_extras: (obras.data ?? []).map((x: any) => x.empresa_id),
+      }
+    }))
+  },
 }
 
 interface EmpresaCriarPayload {
@@ -1833,6 +1857,19 @@ const masterApi = {
       gastos_mes, usuarios: (usuariosRows ?? []).map(u => ({ ...u, ativo: !!u.ativo })), supervisores: supervisoresLista,
     }
   },
+
+  // NOVO: usado pela tela de Log de Exclusões (Master) — mesma
+  // lógica de master.ipc.ts.
+  listarExclusoes: async () => {
+    const { data, error } = await supabase.from('auditoria')
+      .select('id,tabela,descricao,usuario_nome,empresa_id,created_at,empresas(nome)')
+      .eq('acao', 'delete').order('created_at', { ascending: false }).limit(500)
+    if (error) throw new Error(error.message)
+    return (data ?? []).map((row: any) => {
+      const { empresas, ...resto } = row
+      return { ...resto, empresa_nome: empresas?.nome ?? '—' }
+    })
+  },
 }
 
 // NOVO: usado pela tela de Notas Fiscais — mesma lógica de
@@ -2160,6 +2197,12 @@ const solicitacoesPessoalApi = {
 
   concluir: async (id: number) => {
     const { error } = await supabase.from('solicitacoes_pessoal').update({ status: 'concluido', concluido_em: new Date().toISOString() }).eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  excluir: async (id: number) => {
+    const { error } = await supabase.from('solicitacoes_pessoal').delete().eq('id', id)
     if (error) throw new Error(error.message)
     return { ok: true }
   },
