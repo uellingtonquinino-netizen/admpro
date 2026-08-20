@@ -15,6 +15,8 @@ import { SkeletonTable }        from '@components/ui/Skeleton'
 import EmptyState               from '@components/ui/EmptyState'
 import EmitirAPModal            from '@components/fornecedores/EmitirAPModal'
 import EditarApModal            from '@components/fornecedores/EditarApModal'
+import NovoApLoteModal          from '@components/fornecedores/NovoApLoteModal'
+import { gerarCapaAPLote }      from '../documentos/capaLote'
 import { fmtData } from '../documentos/base'
 import { gerarHtmlAP }          from '../documentos/ap'
 import { gerarCapaLote, ApCapaItem } from '../documentos/capaLote'
@@ -22,8 +24,21 @@ import { montarCarimbosParaAnexos } from '../utils/carimbosAp'
 import { formatCPF, formatCNPJ } from '../utils/documentValidators'
 import { formatDate }           from '@utils/format'
 import {
-  Search, Plus, Pencil, Trash2, FileText, Wallet, Users, Printer, CheckCircle2, Archive, Send, FolderClosed, FolderMinus, ChevronDown, ChevronUp,
+  Search, Plus, Pencil, Trash2, FileText, Wallet, Users, Printer, CheckCircle2, Archive, Send, FolderClosed, FolderMinus, ChevronDown, ChevronUp, Package,
 } from 'lucide-react'
+
+interface ApLoteRegistro {
+  id:                 number
+  descricao:          string | null
+  data_emissao:       string
+  quantidade_itens:   number
+  valor_total:        number
+  aprovado_por:       string | null
+  aprovado_em:        string | null
+  aprovado_supervisor_por: string | null
+  pdf_path:           string | null
+  created_at:         string
+}
 
 interface ApRegistro {
   id:                 number
@@ -86,6 +101,11 @@ export default function AutorizacaoPagamento() {
   const [selecionados, setSelecionados] = useState<Set<number>>(new Set())
   const [gerandoLote, setGerandoLote]   = useState(false)
   const [gerandoCapa, setGerandoCapa]   = useState(false)
+  const [novoLoteOpen, setNovoLoteOpen] = useState(false)
+  const [apLotes, setApLotes] = useState<ApLoteRegistro[]>([])
+  const [aplotesExpandidos, setApLotesExpandidos] = useState<Set<number>>(new Set())
+  const [autorizandoLoteId, setAutorizandoLoteId] = useState<number | null>(null)
+  const [abrindoLoteId, setAbrindoLoteId] = useState<number | null>(null)
 
   // ALTERADO: agora pode ter vários lotes abertos ao mesmo tempo
   // (cada "Fechar Lote" cria um novo, numerado) — cada um fica
@@ -122,6 +142,12 @@ export default function AutorizacaoPagamento() {
     if (!empresaId) return
     window.api.ap.resumo({ empresa_id: empresaId, dataInicio: dataInicio || undefined, dataFim: dataFim || undefined }).then(setResumo)
   }, [empresaId, dataInicio, dataFim])
+
+  const carregarApLotes = useCallback(() => {
+    if (!empresaId) return
+    window.api.apLote.listar(empresaId).then(setApLotes)
+  }, [empresaId])
+  useEffect(() => { carregarApLotes() }, [carregarApLotes])
 
   // ALTERADO: agora usa o endpoint dedicado de lotes abertos (pode
   // ter mais de um), em vez de filtrar a lista inteira da obra.
@@ -334,6 +360,78 @@ export default function AutorizacaoPagamento() {
       toast.error(`Erro ao autorizar a AP: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setAutorizandoId(null)
+    }
+  }
+
+  // NOVO: aprova o Pagamento em Lote — mesmo princípio da AP normal
+  // (aprovar_ap_lote decide sozinho se é a vez do Gestor ou do
+  // Supervisor, e limpa pdf_path de propósito, pra forçar gerar de
+  // novo com o carimbo certo na próxima vez que alguém for ver).
+  async function handleAutorizarLote(lote: ApLoteRegistro) {
+    setAutorizandoLoteId(lote.id)
+    try {
+      await window.api.apLote.aprovar(lote.id)
+      toast.success('Pagamento em lote autorizado.')
+      carregarApLotes()
+    } catch (erro) {
+      toast.error(erro instanceof Error ? erro.message : 'Erro ao autorizar o pagamento em lote.')
+    } finally {
+      setAutorizandoLoteId(null)
+    }
+  }
+
+  // NOVO: abre o PDF do Pagamento em Lote — se estiver vazio (recém
+  // aprovado, ou nunca gerado), regenera na hora com os carimbos já
+  // salvos, igual já corrigimos pra Nota Fiscal.
+  async function handleAbrirPdfLote(lote: ApLoteRegistro) {
+    if (!empresaId) return
+    setAbrindoLoteId(lote.id)
+    try {
+      let caminho = lote.pdf_path
+      if (!caminho) {
+        const completo = await window.api.apLote.buscarPorId(lote.id)
+        if (!completo?.itens?.length) { toast.error('Nenhum beneficiário nesse pagamento em lote.'); return }
+
+        const empresaAtual = await window.api.empresas.buscarPorId(empresaId)
+        const titulo = `Pagamento em Lote #${lote.id}`
+        const html = gerarCapaAPLote(
+          { nome: empresaAtual.nome, logo_url: empresaAtual.logo_url }, titulo, completo.data_emissao,
+          completo.itens.map((i: any, idx: number) => ({
+            numero: idx + 1, nome: i.nome, documento: i.documento, descricao: i.descricao,
+            valor: i.valor, banco: i.banco, agencia: i.agencia, operacao: i.operacao, conta: i.conta, tipo_conta: i.tipo_conta,
+          })),
+          format,
+        )
+        const resultado = await window.api.documentos.salvarPdfInterno({
+          html, nomeArquivo: titulo, pastaId: `AP_LOTE_${lote.id}`, empresa_id: empresaId,
+        })
+        if (!resultado.ok) { toast.error('Erro ao gerar o documento.'); return }
+
+        // Carimbos — Gestor e/ou Supervisor, os que já tiverem aprovado.
+        if (completo.aprovado_por && completo.aprovado_em) {
+          await window.api.documentos.carimbarPrimeiraPagina({
+            caminhoPdf: resultado.filePath, aprovadoPor: completo.aprovado_por, aprovadoEm: completo.aprovado_em,
+            carimboBase64: completo.aprovado_por_carimbo_url ?? null, posicao: 'inferior-esquerdo', tamanho: 'pequeno',
+          })
+        }
+        if (completo.aprovado_supervisor_por && completo.aprovado_supervisor_em) {
+          await window.api.documentos.carimbarPrimeiraPagina({
+            caminhoPdf: resultado.filePath, aprovadoPor: completo.aprovado_supervisor_por, aprovadoEm: completo.aprovado_supervisor_em,
+            carimboBase64: completo.aprovado_supervisor_carimbo_url ?? null, posicao: 'inferior-direito', tamanho: 'pequeno',
+          })
+        }
+
+        await window.api.apLote.salvarCaminhoPdf({ id: lote.id, pdf_path: resultado.filePath })
+        caminho = resultado.filePath
+        carregarApLotes()
+      }
+
+      const resultado = await window.api.documentos.abrirArquivo(caminho)
+      if (!resultado.ok) toast.error('Não foi possível abrir o arquivo.')
+    } catch (erro) {
+      toast.error(erro instanceof Error ? erro.message : 'Erro ao abrir o pagamento em lote.')
+    } finally {
+      setAbrindoLoteId(null)
     }
   }
 
@@ -692,6 +790,11 @@ export default function AutorizacaoPagamento() {
             </div>
           )}
           {!somenteLeitura && (
+            <Button variant="outline" icon={<Package size={15} />} onClick={() => setNovoLoteOpen(true)}>
+              Pagamento em Lote
+            </Button>
+          )}
+          {!somenteLeitura && (
             <Button icon={<Plus size={15} />} onClick={() => setNovaOpen(true)}>
               Nova Autorização de Pagamento
             </Button>
@@ -744,6 +847,77 @@ export default function AutorizacaoPagamento() {
           )}
         </div>
       </div>
+
+      {/* NOVO: Pagamentos em Lote — um documento cobrindo vários
+          beneficiários de uma vez, cada um com só 1 valor. Mesmo
+          fluxo de aprovação Gestor→Supervisor, mostrado separado dos
+          lotes de organização normal (que agrupam AP's individuais). */}
+      {apLotes.length > 0 && (
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Package size={15} className="text-purple-400" />
+            <p className="text-sm font-semibold text-gray-200">Pagamentos em Lote</p>
+          </div>
+          {apLotes.map(lote => {
+            const expandido = aplotesExpandidos.has(lote.id)
+            const status = lote.aprovado_supervisor_por
+              ? 'Aprovado (Gestor e Supervisor)'
+              : lote.aprovado_por
+              ? 'Aguardando Supervisor'
+              : 'Aguardando Gestor'
+            return (
+              <div key={lote.id} className="bg-purple-500/5 border border-purple-500/30 rounded-xl mb-3 overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-4 py-3">
+                  <button
+                    onClick={() => setApLotesExpandidos(prev => {
+                      const novo = new Set(prev)
+                      novo.has(lote.id) ? novo.delete(lote.id) : novo.add(lote.id)
+                      return novo
+                    })}
+                    className="flex items-center gap-2 text-left flex-1 min-w-0"
+                  >
+                    {expandido ? <ChevronUp size={15} className="text-purple-400 shrink-0" /> : <ChevronDown size={15} className="text-purple-400 shrink-0" />}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-white truncate">
+                          Pagamento em Lote #{lote.id}{lote.descricao ? ` — ${lote.descricao}` : ''}
+                        </p>
+                        <Badge color={lote.aprovado_supervisor_por ? 'green' : 'yellow'}>{status}</Badge>
+                      </div>
+                      <p className="text-xs text-gray-500">
+                        {lote.quantidade_itens} beneficiário{lote.quantidade_itens !== 1 && 's'} — {format(lote.valor_total)} — {formatDate(lote.data_emissao)}
+                      </p>
+                    </div>
+                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => handleAbrirPdfLote(lote)}
+                      disabled={abrindoLoteId === lote.id}
+                      title="Ver / Imprimir"
+                      className="p-1.5 rounded-lg text-gray-500 hover:text-brand-400 hover:bg-brand-500/10 transition-colors disabled:opacity-40"
+                    >
+                      <Printer size={15} />
+                    </button>
+                    {!somenteLeitura && !lote.aprovado_supervisor_por && podeAprovar && (
+                      <button
+                        onClick={() => handleAutorizarLote(lote)}
+                        disabled={autorizandoLoteId === lote.id}
+                        title="Autorizar"
+                        className="p-1.5 rounded-lg text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                      >
+                        <CheckCircle2 size={15} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {expandido && (
+                  <ApLoteItensExpandido loteId={lote.id} />
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* ALTERADO: agora pode ter vários lotes abertos ao mesmo tempo
           — cada um organizado pelo ADM (Fechar Lote / Enviar para o
@@ -851,6 +1025,13 @@ export default function AutorizacaoPagamento() {
         <EmitirAPModal onClose={() => { setNovaOpen(false); atualizarTudo() }} />
       )}
 
+      {novoLoteOpen && (
+        <NovoApLoteModal
+          onClose={() => setNovoLoteOpen(false)}
+          onSaved={() => { setNovoLoteOpen(false); carregarApLotes() }}
+        />
+      )}
+
       {editando && (
         <EditarApModal
           registro={editando}
@@ -860,6 +1041,52 @@ export default function AutorizacaoPagamento() {
       )}
 
       <ConfirmDialog {...dialogProps} />
+    </div>
+  )
+}
+
+// NOVO: mostra a tabela de beneficiários de um Pagamento em Lote,
+// carregada só quando a pessoa expande — evita buscar tudo de todos
+// os lotes de uma vez sem necessidade. Componente à parte (fora do
+// componente principal), pra manter o próprio estado entre
+// renderizações.
+function ApLoteItensExpandido({ loteId }: { loteId: number }) {
+  const { format } = useCurrency()
+  const [itens, setItens] = useState<any[] | null>(null)
+
+  useEffect(() => {
+    window.api.apLote.buscarPorId(loteId).then((completo: any) => setItens(completo?.itens ?? []))
+  }, [loteId])
+
+  if (itens === null) {
+    return <div className="px-4 py-3 text-xs text-gray-500 border-t border-purple-500/20">Carregando…</div>
+  }
+
+  return (
+    <div className="border-t border-purple-500/20 overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-purple-500/20">
+            {['Nome', 'Documento', 'Descrição', 'Banco', 'Agência', 'Conta', 'Tipo', 'Valor'].map(h => (
+              <th key={h} className="px-3 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {itens.map(i => (
+            <tr key={i.id} className="border-b border-purple-500/10 last:border-0">
+              <td className="px-3 py-2 text-sm text-white whitespace-nowrap">{i.nome}</td>
+              <td className="px-3 py-2 text-sm text-gray-400 whitespace-nowrap">{i.documento || '—'}</td>
+              <td className="px-3 py-2 text-sm text-gray-400">{i.descricao || '—'}</td>
+              <td className="px-3 py-2 text-sm text-gray-400 whitespace-nowrap">{i.banco || '—'}</td>
+              <td className="px-3 py-2 text-sm text-gray-400 whitespace-nowrap">{i.agencia || '—'}</td>
+              <td className="px-3 py-2 text-sm text-gray-400 whitespace-nowrap">{i.conta || '—'}{i.conta_digito ? `-${i.conta_digito}` : ''}</td>
+              <td className="px-3 py-2 text-sm text-gray-400 whitespace-nowrap">{i.tipo_conta || '—'}</td>
+              <td className="px-3 py-2 text-sm text-white whitespace-nowrap text-right">{format(Number(i.valor))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
