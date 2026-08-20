@@ -610,6 +610,57 @@ const colaboradoresApi = {
     if (error) throw new Error(error.message)
     return data ?? []
   },
+
+  // NOVO: completa o CRUD (antes só tinha listar/buscarPorId/excluir).
+  criar: async (p: Record<string, unknown> & { empresa_id: number; nome: string }) => {
+    const dados = { ...p, pcd: p.pcd ? 1 : 0, alojado: p.alojado ? 1 : 0, tem_baixada: p.tem_baixada ? 1 : 0 }
+    const { data, error } = await supabase.from('colaboradores').insert(dados).select('id').single()
+    if (error) throw new Error(error.message)
+    return { id: data.id }
+  },
+
+  atualizar: async (p: Record<string, unknown> & { id: number }) => {
+    const { id, ...resto } = p
+    const dados = { ...resto, pcd: resto.pcd ? 1 : 0, alojado: resto.alojado ? 1 : 0, tem_baixada: resto.tem_baixada ? 1 : 0 }
+    const { error } = await supabase.from('colaboradores').update(dados).eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  historicoDocumentos: async (colaboradorId: number) => {
+    const { data, error } = await supabase.from('colaborador_documentos').select('id,tipo,created_at').eq('colaborador_id', colaboradorId).order('created_at', { ascending: false }).limit(20)
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+
+  registrarDocumento: async (p: { colaborador_id: number; empresa_id: number; tipo: string; dados_json: string }) => {
+    const { error } = await supabase.from('colaborador_documentos').insert(p)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  // NOVO: aceita File (arquivo do navegador) em vez de caminho local.
+  adicionarAnexo: async (p: { colaborador_id: number; arquivo: File; descricao?: string | null }) => {
+    const { data: c, error: ce } = await supabase.from('colaboradores').select('empresa_id').eq('id', p.colaborador_id).single()
+    if (ce) throw new Error(ce.message)
+    const remoto = `${c.empresa_id}/${p.colaborador_id}/${Date.now()}-${p.arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const { error: e1 } = await supabase.storage.from('documentos-rh').upload(remoto, p.arquivo)
+    if (e1) throw new Error(e1.message)
+    const { data, error } = await supabase.from('colaboradores_anexos').insert({ colaborador_id: p.colaborador_id, caminho: `supabase://${remoto}`, nome: p.arquivo.name, descricao: p.descricao ?? null }).select('id').single()
+    if (error) throw new Error(error.message)
+    return { id: data.id }
+  },
+
+  removerAnexo: async (id: number) => {
+    const { data, error } = await supabase.from('colaboradores_anexos').select('caminho').eq('id', id).single()
+    if (error) throw new Error(error.message)
+    if (data.caminho.startsWith('supabase://')) {
+      await supabase.storage.from('documentos-rh').remove([data.caminho.replace('supabase://', '')])
+    }
+    const r = await supabase.from('colaboradores_anexos').delete().eq('id', id)
+    if (r.error) throw new Error(r.error.message)
+    return { ok: true }
+  },
 }
 
 // NOVO: usado pelo ColaboradorModal (dropdowns de Função/Setor/
