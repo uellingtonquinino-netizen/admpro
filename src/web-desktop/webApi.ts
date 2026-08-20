@@ -1610,14 +1610,21 @@ const apApi = {
     const [{ data: ap, error: e1 }, { data: boletos, error: e2 }, { data: anexosRows, error: e3 }] = await Promise.all([
       supabase.from('autorizacoes_pagamento').select('*').eq('id', id).maybeSingle(),
       supabase.from('autorizacoes_pagamento_boletos').select('*').eq('ap_id', id).order('vencimento'),
-      supabase.from('autorizacoes_pagamento_anexos').select('caminho').eq('ap_id', id).order('ordem'),
+      supabase.from('autorizacoes_pagamento_anexos').select('caminho,vai_assinatura').eq('ap_id', id).order('ordem'),
     ])
     for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
     if (!ap) return null
     const ids = [ap.aprovado_por_usuario_id, ap.aprovado_supervisor_por_usuario_id].filter((x): x is number => x !== null)
     let usuarios: any[] = []
     if (ids.length) {
-      const r = await supabase.from('usuarios').select('id,carimbo_url').in('id', ids)
+      // CORRIGIDO: ler direto de "usuarios" aqui é bloqueado pela
+      // política de segurança (só permite ver o PRÓPRIO perfil, ou
+      // ser Master) — sempre que quem está olhando a AP é diferente
+      // de quem aprovou, essa consulta voltava vazia sem erro
+      // nenhum, e o carimbo sumia. A função carimbos_usuarios() no
+      // banco (mesma usada no desktop) contorna essa trava só pra
+      // esse uso legítimo.
+      const r = await supabase.rpc('carimbos_usuarios', { p_ids: ids })
       if (r.error) throw new Error(r.error.message)
       usuarios = r.data ?? []
     }
@@ -1626,7 +1633,13 @@ const apApi = {
       ...ap,
       aprovado_por_carimbo_url: carimbos.get(ap.aprovado_por_usuario_id) ?? null,
       aprovado_supervisor_carimbo_url: carimbos.get(ap.aprovado_supervisor_por_usuario_id) ?? null,
-      boletos: boletos ?? [], anexos: (anexosRows ?? []).map(a => a.caminho),
+      boletos: boletos ?? [],
+      // CORRIGIDO: precisa ser {caminho, vaiAssinatura}[], não uma
+      // lista simples de string — era por isso que o "Vai Assinatura"
+      // se perdia (e o serviço de PDF recebia `caminho: undefined`
+      // em cada anexo, causando o erro "reading 'startsWith'" ao
+      // tentar decidir se era um endereço do Storage).
+      anexos: (anexosRows ?? []).map(a => ({ caminho: a.caminho, vaiAssinatura: !!a.vai_assinatura })),
     }
   },
 
@@ -2127,7 +2140,10 @@ const notasFiscaisApi = {
     const ids = [nota.aprovado_por_usuario_id, nota.aprovado_supervisor_por_usuario_id].filter((x): x is number => x !== null)
     let usuarios: any[] = []
     if (ids.length) {
-      const r = await supabase.from('usuarios').select('id,carimbo_url').in('id', ids)
+      // CORRIGIDO: mesmo problema do ap.buscarPorId (ver comentário
+      // lá) — consulta direta em "usuarios" é bloqueada por RLS
+      // quando quem olha é diferente de quem aprovou.
+      const r = await supabase.rpc('carimbos_usuarios', { p_ids: ids })
       if (r.error) throw new Error(r.error.message)
       usuarios = r.data ?? []
     }
