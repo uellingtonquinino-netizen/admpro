@@ -71,7 +71,7 @@ export default function PainelSetorPessoal() {
   const [loadingDetalhe, setLoadingDetalhe] = useState(false)
 
   const [respostaObs, setRespostaObs] = useState('')
-  const [respostaAnexos, setRespostaAnexos] = useState<{ nome: string; caminho: string }[]>([])
+  const [respostaAnexos, setRespostaAnexos] = useState<{ nome: string; caminho: string; arquivo?: File }[]>([])
   const [enviando, setEnviando] = useState(false)
 
   useEffect(() => {
@@ -137,7 +137,10 @@ export default function PainelSetorPessoal() {
 
   function handleSelecionarAnexos(e: React.ChangeEvent<HTMLInputElement>) {
     const arquivos = Array.from(e.target.files ?? [])
-    const novos = arquivos.map(f => ({ nome: f.name, caminho: (f as unknown as { path: string }).path }))
+    const novos = arquivos.map(f => {
+      const caminhoLocal = (f as unknown as { path?: string }).path
+      return { nome: f.name, caminho: caminhoLocal ?? f.name, arquivo: caminhoLocal ? undefined : f }
+    })
     setRespostaAnexos(prev => [...prev, ...novos])
     e.target.value = ''
   }
@@ -150,11 +153,20 @@ export default function PainelSetorPessoal() {
     }
     setEnviando(true)
     try {
+      // NOVO: rodando na web, resolve cada File pra um caminho de
+      // verdade antes de mandar — no desktop `.path` já resolve
+      // isso sozinho.
+      const anexosProntos = window.api.documentos.prepararAnexoWeb
+        ? await Promise.all(respostaAnexos.map(async a => a.arquivo
+            ? { nome: a.nome, caminho: await window.api.documentos.prepararAnexoWeb!({ empresa_id: detalhe.empresa_id, pasta_id: 'solicitacoes-temp', arquivo: a.arquivo }) }
+            : { nome: a.nome, caminho: a.caminho }))
+        : respostaAnexos
+
       await window.api.solicitacoesPessoal.responder({
         id:                    detalhe.id,
         respondido_por:        usuario.nome,
         resposta_observacoes:  respostaObs || null,
-        anexos:                respostaAnexos,
+        anexos:                anexosProntos,
       })
       toast.success('Resposta enviada — o ADM já pode baixar os documentos.')
       carregar()

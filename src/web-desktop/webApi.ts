@@ -2324,27 +2324,24 @@ const almoxarifadoSaidasApi = {
 }
 
 // NOVO: usado nas telas de Solicitações ao Setor Pessoal (ADM e
-// Setor Pessoal) — mesma lógica de solicitacoesPessoal.ipc.ts, com
-// anexos como File[] (upload direto pro Storage), incluindo as
-// notificações (mesma tabela notificacoes_eventos já usada em outros
-// módulos).
+// Setor Pessoal) — mesma lógica de solicitacoesPessoal.ipc.ts.
+// Anexos chegam já como {nome, caminho} — o caminho já é um endereço
+// válido do Storage (a tela resolve isso antes, via
+// prepararAnexoWeb, igual foi corrigido pra Nota Fiscal), não sobe
+// nada de novo aqui, só vincula.
 const TITULO_TIPO_SOLICITACAO: Record<string, string> = {
   admissao: 'Admissão', desligamento: 'Desligamento', alteracao_salarial: 'Alteração salarial', outro: 'Movimentação',
 }
-async function enviarAnexosSolicitacao(empresaId: number, solicitacaoId: number, arquivos: { arquivo: File }[], origem: 'adm' | 'setor_pessoal') {
-  for (let ordem = 0; ordem < arquivos.length; ordem++) {
-    const { arquivo } = arquivos[ordem]
-    const remoto = `${empresaId}/solicitacoes/${solicitacaoId}/${Date.now()}-${arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const { error: e1 } = await supabase.storage.from('documentos-rh').upload(remoto, arquivo)
-    if (e1) throw new Error(e1.message)
-    const { error: e2 } = await supabase.from('solicitacoes_pessoal_anexos').insert({ solicitacao_id: solicitacaoId, caminho: `supabase://${remoto}`, nome: arquivo.name, origem, ordem })
+async function enviarAnexosSolicitacao(_empresaId: number, solicitacaoId: number, anexos: { nome: string; caminho: string }[], origem: 'adm' | 'setor_pessoal') {
+  for (let ordem = 0; ordem < anexos.length; ordem++) {
+    const { error: e2 } = await supabase.from('solicitacoes_pessoal_anexos').insert({ solicitacao_id: solicitacaoId, caminho: anexos[ordem].caminho, nome: anexos[ordem].nome, origem, ordem })
     if (e2) throw new Error(e2.message)
   }
 }
 const solicitacoesPessoalApi = {
   criar: async (p: {
     empresa_id: number; colaborador_id: number; tipo: 'admissao' | 'desligamento' | 'alteracao_salarial' | 'outro'
-    observacoes?: string | null; solicitado_por: string; anexos?: { arquivo: File }[]
+    observacoes?: string | null; solicitado_por: string; anexos?: { nome: string; caminho: string }[]
   }) => {
     const { data, error } = await supabase.from('solicitacoes_pessoal').insert({
       empresa_id: p.empresa_id, colaborador_id: p.colaborador_id, tipo: p.tipo,
@@ -2407,7 +2404,7 @@ const solicitacoesPessoalApi = {
     }
   },
 
-  responder: async (p: { id: number; respondido_por: string; resposta_observacoes?: string | null; anexos?: { arquivo: File }[] }) => {
+  responder: async (p: { id: number; respondido_por: string; resposta_observacoes?: string | null; anexos?: { nome: string; caminho: string }[] }) => {
     const { data: solicitacao, error: e0 } = await supabase.from('solicitacoes_pessoal').select('empresa_id').eq('id', p.id).single()
     if (e0) throw new Error(e0.message)
     const { error } = await supabase.from('solicitacoes_pessoal').update({

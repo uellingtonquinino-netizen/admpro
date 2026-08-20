@@ -25,12 +25,15 @@ export default function SolicitarPessoalModal({ colaboradorId, colaboradorNome, 
   const usuario = useAuthStore(s => s.usuario)
   const [tipo, setTipo] = useState('admissao')
   const [observacoes, setObservacoes] = useState('')
-  const [anexos, setAnexos] = useState<{ nome: string; caminho: string }[]>([])
+  const [anexos, setAnexos] = useState<{ nome: string; caminho: string; arquivo?: File }[]>([])
   const [enviando, setEnviando] = useState(false)
 
   function handleSelecionarAnexos(e: React.ChangeEvent<HTMLInputElement>) {
     const arquivos = Array.from(e.target.files ?? [])
-    const novos = arquivos.map(f => ({ nome: f.name, caminho: (f as unknown as { path: string }).path }))
+    const novos = arquivos.map(f => {
+      const caminhoLocal = (f as unknown as { path?: string }).path
+      return { nome: f.name, caminho: caminhoLocal ?? f.name, arquivo: caminhoLocal ? undefined : f }
+    })
     setAnexos(prev => [...prev, ...novos])
     e.target.value = ''
   }
@@ -39,13 +42,22 @@ export default function SolicitarPessoalModal({ colaboradorId, colaboradorNome, 
     if (!usuario) return
     setEnviando(true)
     try {
+      // NOVO: rodando na web, resolve cada File pra um caminho de
+      // verdade (subindo pro Storage) antes de mandar — no desktop
+      // `.path` já resolve isso sozinho.
+      const anexosProntos = window.api.documentos.prepararAnexoWeb
+        ? await Promise.all(anexos.map(async a => a.arquivo
+            ? { nome: a.nome, caminho: await window.api.documentos.prepararAnexoWeb!({ empresa_id: empresaId, pasta_id: 'solicitacoes-temp', arquivo: a.arquivo }) }
+            : { nome: a.nome, caminho: a.caminho }))
+        : anexos
+
       await window.api.solicitacoesPessoal.criar({
         empresa_id:     empresaId,
         colaborador_id: colaboradorId,
         tipo,
         observacoes:    observacoes || null,
         solicitado_por: usuario.nome,
-        anexos,
+        anexos:         anexosProntos,
       })
       toast.success('Enviado para o Setor Pessoal.')
       onEnviado()
