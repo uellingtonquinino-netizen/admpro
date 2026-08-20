@@ -212,6 +212,8 @@ export default function NotaFiscalModal({ nota, onClose, onSaved }: Props) {
 
       // Se tem anexo em qualquer categoria, já gera os dois PDFs
       // (nota e boletos, cada um o seu) prontos pro Gestor visualizar.
+      console.log('[DIAGNÓSTICO] anexosNotaResolvidos:', anexosNotaResolvidos)
+      console.log('[DIAGNÓSTICO] anexosBoletosResolvidos:', anexosBoletosResolvidos)
       if (anexosNotaResolvidos.length > 0 || anexosBoletosResolvidos.length > 0) {
         const resultadoPdfs = await window.api.documentos.gerarPdfsSeparados({
           notaArquivos:   anexosNotaResolvidos.map(a => a.caminho),
@@ -219,6 +221,7 @@ export default function NotaFiscalModal({ nota, onClose, onSaved }: Props) {
           pastaId:        `NF_${notaId}`,
           empresa_id:     empresaId,
         })
+        console.log('[DIAGNÓSTICO] resultadoPdfs recebido na tela:', resultadoPdfs)
         if (resultadoPdfs.ok) {
           await window.api.notasFiscais.salvarCaminhosPdf({
             id: notaId,

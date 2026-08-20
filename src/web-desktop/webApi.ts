@@ -2714,22 +2714,30 @@ const documentosApi = {
     notaArquivos: string[]; boletoArquivos: string[]; pastaId: string; empresa_id?: number
   }) => {
     if (!p.empresa_id) throw new Error('empresa_id é obrigatório pra salvar o documento.')
+    console.log('[DIAGNÓSTICO] gerarPdfsSeparados chamado com:', JSON.stringify(p, null, 2))
     let notaPdfPath: string | null = null
     let boletosPdfPath: string | null = null
     if (p.notaArquivos.length > 0) {
+      console.log('[DIAGNÓSTICO] Gerando PDF da nota, anexos:', p.notaArquivos)
       const r = await chamarServicoPdf('/api/gerar-pdf', {
         nomeArquivo: `${p.pastaId}_nota`, pastaId: p.pastaId, empresa_id: p.empresa_id,
         anexos: p.notaArquivos.map(caminho => ({ caminho })),
       })
+      console.log('[DIAGNÓSTICO] Resultado da nota:', r)
       notaPdfPath = r.path
+    } else {
+      console.log('[DIAGNÓSTICO] notaArquivos veio VAZIO — não gera PDF nenhum da nota.')
     }
     if (p.boletoArquivos.length > 0) {
+      console.log('[DIAGNÓSTICO] Gerando PDF dos boletos, anexos:', p.boletoArquivos)
       const r = await chamarServicoPdf('/api/gerar-pdf', {
         nomeArquivo: `${p.pastaId}_boletos`, pastaId: p.pastaId, empresa_id: p.empresa_id,
         anexos: p.boletoArquivos.map(caminho => ({ caminho })),
       })
+      console.log('[DIAGNÓSTICO] Resultado dos boletos:', r)
       boletosPdfPath = r.path
     }
+    console.log('[DIAGNÓSTICO] Retorno final:', { notaPdfPath, boletosPdfPath })
     return { ok: true, notaPdfPath, boletosPdfPath }
   },
 
