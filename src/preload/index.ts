@@ -216,6 +216,17 @@ const api = {
     excluir:      (id: number) => ipcRenderer.invoke('ap:excluir',      id),
   },
 
+  // NOVO: Autorização de Pagamento em Lote — vários beneficiários,
+  // mesmo fluxo de aprovação da AP normal.
+  apLote: {
+    criar:            (p: unknown) => ipcRenderer.invoke('apLote:criar', p),
+    listar:           (empresaId: number) => ipcRenderer.invoke('apLote:listar', empresaId),
+    buscarPorId:      (id: number) => ipcRenderer.invoke('apLote:buscarPorId', id),
+    aprovar:          (id: number) => ipcRenderer.invoke('apLote:aprovar', id),
+    salvarCaminhoPdf: (p: unknown) => ipcRenderer.invoke('apLote:salvarCaminhoPdf', p),
+    excluir:          (id: number) => ipcRenderer.invoke('apLote:excluir', id),
+  },
+
   // ── Recibos (numeração automática) ───────────────────────
   recibos: {
     emitir: (p: unknown) => ipcRenderer.invoke('recibos:emitir', p),

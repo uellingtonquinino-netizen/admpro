@@ -11,6 +11,7 @@ import { registerColaboradoresIpc } from './colaboradores.ipc'
 import { registerDocumentosIpc }    from './documentos.ipc'
 import { registerFornecedoresIpc }  from './fornecedores.ipc'
 import { registerApIpc }            from './ap.ipc'
+import { registerApLoteIpc }        from './apLote.ipc'
 import { registerRecibosIpc }       from './recibos.ipc'
 import { registerOpcoesIpc }        from './opcoes.ipc'
 import { registerTemplatesIpc }     from './templates.ipc'
@@ -52,6 +53,7 @@ export function registerAllIpc() {
   registerDocumentosIpc()
   registerFornecedoresIpc()
   registerApIpc()
+  registerApLoteIpc()
   registerRecibosIpc()
   registerOpcoesIpc()
   registerTemplatesIpc()

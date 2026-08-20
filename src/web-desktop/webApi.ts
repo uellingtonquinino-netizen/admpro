@@ -1680,6 +1680,91 @@ const apApi = {
   },
 }
 
+// NOVO: Autorização de Pagamento em Lote — um documento cobrindo
+// vários fornecedores/colaboradores de uma vez, cada um com só 1
+// valor (diferente da AP normal, que aceita vários boletos por
+// pessoa). Mesmo fluxo de aprovação Gestor→Supervisor.
+interface ApLoteItemPayload {
+  ordem?: number
+  beneficiario_tipo: 'fornecedor' | 'colaborador'
+  beneficiario_id?: number | null
+  nome: string
+  documento?: string | null
+  descricao?: string | null
+  valor: number
+  banco?: string | null
+  agencia?: string | null
+  operacao?: string | null
+  conta?: string | null
+  conta_digito?: string | null
+  tipo_conta?: string | null
+}
+const apLoteApi = {
+  criar: async (p: {
+    empresa_id: number; descricao?: string | null; data_emissao?: string
+    solicitante?: string | null; autorizado_por?: string | null
+    criado_por?: string | null; criado_por_usuario_id?: number | null
+    itens: ApLoteItemPayload[]
+  }) => {
+    const { data, error } = await supabase.rpc('criar_ap_lote', { p })
+    if (error) throw new Error(error.message)
+    return { id: data }
+  },
+
+  listar: async (empresaId: number) => {
+    const [{ data: lotes, error: e1 }, { data: itens, error: e2 }] = await Promise.all([
+      supabase.from('autorizacoes_pagamento_lote').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+      supabase.from('autorizacoes_pagamento_lote_itens').select('autorizacao_lote_id,valor'),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    return (lotes ?? []).map(l => {
+      const doLote = (itens ?? []).filter(i => i.autorizacao_lote_id === l.id)
+      return { ...l, quantidade_itens: doLote.length, valor_total: doLote.reduce((s, i) => s + Number(i.valor), 0) }
+    })
+  },
+
+  buscarPorId: async (id: number) => {
+    const [{ data: lote, error: e1 }, { data: itens, error: e2 }] = await Promise.all([
+      supabase.from('autorizacoes_pagamento_lote').select('*').eq('id', id).maybeSingle(),
+      supabase.from('autorizacoes_pagamento_lote_itens').select('*').eq('autorizacao_lote_id', id).order('ordem'),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    if (!lote) return null
+    const ids = [lote.aprovado_por_usuario_id, lote.aprovado_supervisor_por_usuario_id].filter((x): x is number => x !== null)
+    let carimbos = new Map<number, string | null>()
+    if (ids.length) {
+      const r = await supabase.rpc('carimbos_usuarios', { p_ids: ids })
+      if (r.error) throw new Error(r.error.message)
+      carimbos = new Map((r.data ?? []).map((u: any) => [u.id, u.carimbo_url]))
+    }
+    return {
+      ...lote, itens: itens ?? [],
+      aprovado_por_carimbo_url: carimbos.get(lote.aprovado_por_usuario_id) ?? null,
+      aprovado_supervisor_carimbo_url: carimbos.get(lote.aprovado_supervisor_por_usuario_id) ?? null,
+    }
+  },
+
+  aprovar: async (id: number) => {
+    const { data, error } = await supabase.rpc('aprovar_ap_lote', { p_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true, aprovado_em: data }
+  },
+
+  salvarCaminhoPdf: async (p: { id: number; pdf_path: string }) => {
+    const { error } = await supabase.from('autorizacoes_pagamento_lote').update({ pdf_path: p.pdf_path }).eq('id', p.id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_ap_lote', { p_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+}
+
 // NOVO: usado pela tela de Autorização de Pagamento (lotes) — mesma
 // lógica de lotes.ipc.ts (só a parte Supabase, via RPCs).
 const lotesApi = {
@@ -3092,4 +3177,4 @@ const obraDiarioApi = {
   },
 }
 
-export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi, contratos: contratosApi, obraEap: obraEapApi, obraDiario: obraDiarioApi }
+export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, apLote: apLoteApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi, contratos: contratosApi, obraEap: obraEapApi, obraDiario: obraDiarioApi }

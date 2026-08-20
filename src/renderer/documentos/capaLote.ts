@@ -92,3 +92,85 @@ export function gerarCapaLote(empresa: EmpresaInfo, tituloLote: string, itens: A
     `,
   })
 }
+
+// NOVO: Autorização de Pagamento em Lote — mesmo estilo visual da
+// capa acima, mas 1 valor por beneficiário (sem vencimento avulso,
+// já que o pagamento em lote é sempre à vista/mesma data).
+export interface ApLoteCapaItem {
+  numero:      number
+  nome:        string
+  documento:   string  // CNPJ ou CPF, já formatado
+  descricao:   string
+  valor:       number
+  banco:       string
+  agencia:     string
+  operacao:    string
+  conta:       string
+  tipo_conta:  string
+}
+
+export function gerarCapaAPLote(
+  empresa: EmpresaInfo, titulo: string, dataEmissao: string, itens: ApLoteCapaItem[], formatMoeda: (v: number) => string
+): string {
+  const colunas = ['Num', 'Nome', 'CNPJ / CPF', 'Descrição', 'Banco', 'Agência', 'OP', 'Conta', 'Tipo', 'Valor']
+  const total = itens.reduce((soma, i) => soma + i.valor, 0)
+
+  const cabecalho = colunas.map((c, i) =>
+    `<td class="label${i !== 1 && i !== 3 ? ' col-encolhe' : ''}">${c}</td>`
+  ).join('')
+
+  const linhas = itens.length === 0
+    ? `<tr><td colspan="${colunas.length}" style="text-align:center;color:#777;">Nenhum beneficiário nesse lote.</td></tr>`
+    : itens.map(i => `
+        <tr>
+          <td class="col-encolhe">${i.numero}</td>
+          <td>${i.nome || '—'}</td>
+          <td class="col-encolhe">${i.documento || '—'}</td>
+          <td>${i.descricao || '—'}</td>
+          <td class="col-encolhe">${i.banco || '—'}</td>
+          <td class="col-encolhe">${i.agencia || '—'}</td>
+          <td class="col-encolhe">${i.operacao || '—'}</td>
+          <td class="col-encolhe">${i.conta || '—'}</td>
+          <td class="col-encolhe">${i.tipo_conta || '—'}</td>
+          <td class="col-encolhe" style="text-align:right;">${formatMoeda(i.valor)}</td>
+        </tr>
+      `).join('')
+
+  const linhaTotal = `
+    <tr class="linha-total">
+      <td colspan="${colunas.length - 1}" style="text-align:right;font-weight:bold;">TOTAL GERAL</td>
+      <td class="col-encolhe" style="text-align:right;font-weight:bold;">${formatMoeda(total)}</td>
+    </tr>
+  `
+
+  const corpo = `
+    <table class="dados dados-autofit">
+      <tr>${cabecalho}</tr>
+      ${linhas}
+      ${linhaTotal}
+    </table>
+  `
+
+  return documentoBase({
+    titulo,
+    fontSize: '9pt',
+    paisagem: true,
+    margem: '8mm 8mm',
+    corpoHtml: `
+      <style>
+        body, table.dados-autofit td { font-family: 'Calibri Light', Calibri, Arial, sans-serif; font-weight: bold; }
+        .titulo { font-family: Arial, 'Segoe UI', Helvetica, sans-serif; }
+        table.dados-autofit { width: 100%; table-layout: auto; border-collapse: collapse; font-size: 9pt; }
+        table.dados-autofit td { font-size: 9pt; white-space: nowrap; padding: 4px 8px; border: 1px solid #888; }
+        table.dados-autofit td:not(.col-encolhe) { white-space: normal; overflow-wrap: break-word; word-break: normal; }
+        table.dados-autofit td.col-encolhe { width: 1%; }
+        table.dados-autofit tr.linha-total td { border-top: 2px solid #333; padding-top: 8px; }
+      </style>
+      ${cabecalhoComLogo(titulo, empresa.logo_url)}
+      <p style="text-align:center;color:#555;margin-top:-6px;margin-bottom:14px;">
+        ${empresa.nome} &nbsp;•&nbsp; Emissão ${fmtData(dataEmissao)} &nbsp;•&nbsp; ${itens.length} beneficiário(s) &nbsp;•&nbsp; Emitido em ${hoje()}
+      </p>
+      ${corpo}
+    `,
+  })
+}

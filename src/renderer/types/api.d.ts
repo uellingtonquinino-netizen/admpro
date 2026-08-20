@@ -30,6 +30,7 @@ declare global {
       documentos:    Record<string, (...args: any[]) => Promise<any>>
       fornecedores:  Record<string, (...args: any[]) => Promise<any>>
       ap:            Record<string, (...args: any[]) => Promise<any>>
+      apLote:        Record<string, (...args: any[]) => Promise<any>>
       recibos:       Record<string, (...args: any[]) => Promise<any>>
       opcoes:        Record<string, (...args: any[]) => Promise<any>>
       templates:     Record<string, (...args: any[]) => Promise<any>>
