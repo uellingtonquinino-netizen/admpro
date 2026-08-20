@@ -22,6 +22,9 @@ interface Boleto {
 interface Anexo {
   nome:    string
   caminho: string
+  // NOVO: só existe rodando na web — ver mesmo comentário em
+  // EmitirAPModal.tsx (`.path` de um File só existe no Electron).
+  arquivo?: File
 }
 
 interface NotaExistente {
@@ -129,10 +132,10 @@ export default function NotaFiscalModal({ nota, onClose, onSaved }: Props) {
     setAnexos: React.Dispatch<React.SetStateAction<Anexo[]>>
   ) {
     const arquivos = Array.from(e.target.files ?? [])
-    const novos: Anexo[] = arquivos.map(f => ({
-      nome:    f.name,
-      caminho: (f as unknown as { path: string }).path,
-    }))
+    const novos: Anexo[] = arquivos.map(f => {
+      const caminhoLocal = (f as unknown as { path?: string }).path
+      return { nome: f.name, caminho: caminhoLocal ?? f.name, arquivo: caminhoLocal ? undefined : f }
+    })
     setAnexos(prev => [...prev, ...novos])
     e.target.value = ''
   }
@@ -164,6 +167,22 @@ export default function NotaFiscalModal({ nota, onClose, onSaved }: Props) {
 
     setSalvando(true)
     try {
+      // NOVO: rodando na web, cada anexo pode ter vindo como um File
+      // de verdade (em vez de já ter um caminho, que só existe no
+      // Electron) — resolve isso ANTES de montar qualquer coisa, pra
+      // todo o resto do código continuar recebendo string simples,
+      // igual sempre funcionou no desktop.
+      async function resolverAnexos(lista: Anexo[]): Promise<Anexo[]> {
+        if (!window.api.documentos.prepararAnexoWeb) return lista // desktop — .path já resolve sozinho
+        return Promise.all(lista.map(async a => {
+          if (!a.arquivo) return a
+          const caminho = await window.api.documentos.prepararAnexoWeb!({ empresa_id: empresaId, pasta_id: 'notas-fiscais-temp', arquivo: a.arquivo })
+          return { ...a, caminho }
+        }))
+      }
+      const anexosNotaResolvidos = await resolverAnexos(anexosNota)
+      const anexosBoletosResolvidos = await resolverAnexos(anexosBoletos)
+
       const payload = {
         empresa_id:      empresaId,
         numero_pedido:   numeroPedido,
@@ -176,8 +195,8 @@ export default function NotaFiscalModal({ nota, onClose, onSaved }: Props) {
           valor:      Number(b.valor.toString().replace(',', '.')),
           vencimento: b.vencimento,
         })),
-        anexos_nota:    anexosNota.map(a => a.caminho),
-        anexos_boletos: anexosBoletos.map(a => a.caminho),
+        anexos_nota:    anexosNotaResolvidos.map(a => a.caminho),
+        anexos_boletos: anexosBoletosResolvidos.map(a => a.caminho),
       }
 
       let notaId: number
@@ -193,10 +212,10 @@ export default function NotaFiscalModal({ nota, onClose, onSaved }: Props) {
 
       // Se tem anexo em qualquer categoria, já gera os dois PDFs
       // (nota e boletos, cada um o seu) prontos pro Gestor visualizar.
-      if (anexosNota.length > 0 || anexosBoletos.length > 0) {
+      if (anexosNotaResolvidos.length > 0 || anexosBoletosResolvidos.length > 0) {
         const resultadoPdfs = await window.api.documentos.gerarPdfsSeparados({
-          notaArquivos:   anexosNota.map(a => a.caminho),
-          boletoArquivos: anexosBoletos.map(a => a.caminho),
+          notaArquivos:   anexosNotaResolvidos.map(a => a.caminho),
+          boletoArquivos: anexosBoletosResolvidos.map(a => a.caminho),
           pastaId:        `NF_${notaId}`,
           empresa_id:     empresaId,
         })

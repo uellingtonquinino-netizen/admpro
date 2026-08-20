@@ -2763,6 +2763,21 @@ const documentosApi = {
     }
   },
 
+  // NOVO: exclusivo da web — sobe um único arquivo avulso pro
+  // Storage e devolve o endereço (supabase://...). Usado por telas
+  // (como NotaFiscalModal.tsx) que ainda mandam os anexos como lista
+  // de STRING simples pro resto do fluxo (formato que precisa
+  // continuar igual no desktop) — a tela resolve cada File pra um
+  // caminho de verdade ANTES de montar o payload, chamando essa
+  // função só quando ela existir (no desktop, essa função nem
+  // existe, e a tela usa o .path do jeito de sempre).
+  prepararAnexoWeb: async (p: { empresa_id: number; pasta_id: string; arquivo: File }) => {
+    const remoto = `${p.empresa_id}/${p.pasta_id}/${Date.now()}-${p.arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const { error } = await supabase.storage.from('documentos-rh').upload(remoto, p.arquivo)
+    if (error) throw new Error(error.message)
+    return `supabase://documentos-rh/${remoto}`
+  },
+
   // ALTERADO: no desktop copia os PDFs pra uma pasta escolhida pelo
   // usuário — não existe "pasta local" na web. Em vez disso, baixa
   // tudo junto num único arquivo .zip.
