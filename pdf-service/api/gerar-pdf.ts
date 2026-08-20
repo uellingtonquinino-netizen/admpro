@@ -25,7 +25,7 @@ if (!globalThis.WebSocket) {
 // (e a versão do @sparticuz/chromium-min no package.json) — não
 // precisa mexer em mais nada.
 const CHROMIUM_PACK_URL = process.env.CHROMIUM_PACK_URL
-  ?? 'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar'
+  ?? 'https://github.com/Sparticuz/chromium/releases/download/v149.0.0/chromium-v149.0.0-pack.x64.tar'
 
 interface CorpoRequisicao {
   html:         string
@@ -72,13 +72,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       args: chromium.args,
       defaultViewport: { width: 1240, height: 1754, deviceScaleFactor: 1 },
       executablePath: await chromium.executablePath(CHROMIUM_PACK_URL),
-      headless: chromium.headless,
+      headless: true,
     })
 
     let bufferDocumento: Buffer
     try {
       const page = await browser.newPage()
-      await page.setContent(p.html, { waitUntil: 'networkidle0' })
+      await page.setContent(p.html, { waitUntil: 'load' })
       // Mesmo princípio do aguardarImagens() do Electron — garante
       // que toda imagem embutida (o carimbo, por exemplo) já
       // terminou de decodificar E de ser desenhada antes de capturar

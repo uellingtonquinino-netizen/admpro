@@ -5,13 +5,13 @@
   "description": "Serviço isolado, na Vercel, que gera PDF a partir de HTML (a mesma automação de carimbo/anexos que o desktop já faz, só que rodando no servidor em vez do computador). Projeto separado do app mobile de propósito — assim nenhum problema aqui afeta o mobile.",
   "type": "module",
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "dependencies": {
-    "@sparticuz/chromium-min": "^131.0.1",
+    "@sparticuz/chromium-min": "^149.0.0",
     "@supabase/supabase-js": "^2.45.4",
     "pdf-lib": "^1.17.1",
-    "puppeteer-core": "^23.11.1",
+    "puppeteer-core": "^25.8.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
