@@ -178,12 +178,46 @@ export default function NotasFiscais() {
 
   // NOVO: abre o PDF já pronto (nota escaneada, ou boleto) no leitor
   // padrão — nada é gerado aqui, só abre o que já foi salvo.
-  async function handleAbrirPdf(caminho: string | null, id: number) {
-    if (!caminho) { toast.error('Nenhum arquivo anexado nessa categoria.'); return }
+  // CORRIGIDO: a aprovação (Gestor, Supervisor ou Central) limpa
+  // nota_pdf_path de propósito no banco (mesmo princípio da AP —
+  // evita reaproveitar um PDF gerado ANTES da aprovação, sem o
+  // carimbo certo). Só que, diferente da AP, essa tela nunca sabia
+  // REGERAR quando encontrava vazio — só mostrava "Nenhum arquivo
+  // anexado", mesmo a nota estando aprovada e com o anexo original
+  // ainda lá. Agora, pra categoria "nota" especificamente, se estiver
+  // vazio E a NF já tiver sido aprovada, gera de novo (com carimbo)
+  // antes de abrir — só falha de verdade se não tiver anexo nenhum.
+  async function handleAbrirPdf(caminho: string | null, id: number, categoria: 'nota' | 'boleto' = 'boleto') {
     setAbrindoId(id)
     try {
-      const resultado = await window.api.documentos.abrirArquivo(caminho)
+      let caminhoFinal = caminho
+      if (!caminhoFinal && categoria === 'nota') {
+        const completa = await window.api.notasFiscais.buscarPorId(id)
+        if (!completa?.anexos_nota?.length) { toast.error('Nenhum arquivo anexado nessa categoria.'); return }
+
+        const resultado = await window.api.documentos.gerarPdfsSeparados({
+          notaArquivos: completa.anexos_nota, boletoArquivos: [], pastaId: `NF_${id}`, empresa_id: empresaId ?? undefined,
+        })
+        if (!resultado.ok || !resultado.notaPdfPath) { toast.error('Erro ao gerar o arquivo da nota.'); return }
+
+        if (completa.aprovado_por && completa.aprovado_em) {
+          await window.api.documentos.carimbarPrimeiraPagina({
+            caminhoPdf: resultado.notaPdfPath, aprovadoPor: completa.aprovado_por, aprovadoEm: completa.aprovado_em,
+            carimboBase64: completa.aprovado_por_carimbo_url ?? null, posicao: 'inferior-esquerdo', tamanho: 'pequeno',
+          })
+        }
+
+        await window.api.notasFiscais.salvarCaminhosPdf({ id, nota_pdf_path: resultado.notaPdfPath, boletos_pdf_path: null })
+        caminhoFinal = resultado.notaPdfPath
+        fetchNotas() // atualiza a lista, pro botão já vir habilitado da próxima vez
+      }
+      if (!caminhoFinal) { toast.error('Nenhum arquivo anexado nessa categoria.'); return }
+
+      const resultado = await window.api.documentos.abrirArquivo(caminhoFinal)
       if (!resultado.ok) toast.error('Não foi possível abrir o arquivo. Ele pode ter sido movido ou apagado.')
+    } catch (erro) {
+      console.error('Erro ao abrir o PDF.', erro)
+      toast.error(`Erro ao abrir o arquivo: ${erro instanceof Error ? erro.message : String(erro)}`)
     } finally {
       setAbrindoId(null)
     }
@@ -194,23 +228,13 @@ export default function NotasFiscais() {
     if (!usuario) return
     setAutorizandoId(n.id)
     try {
-      const { aprovado_em } = await window.api.notasFiscais.aprovar({ id: n.id, aprovado_por: usuario.nome, usuario_id: usuario.id })
+      await window.api.notasFiscais.aprovar({ id: n.id, aprovado_por: usuario.nome, usuario_id: usuario.id })
 
-      // Carimbo fica só na Nota Fiscal (não no boleto), sobreposto no
-      // canto inferior esquerdo da primeira página — mesma posição de
-      // sempre. CORRIGIDO: não estava passando a imagem do carimbo do
-      // usuário, então sempre caía no carimbo de texto ("Aprovado por
-      // X em Y"), mesmo pra quem já tinha subido uma imagem em
-      // Configurações.
-      if (n.nota_pdf_path) {
-        await window.api.documentos.carimbarPrimeiraPagina({
-          caminhoPdf:  n.nota_pdf_path,
-          aprovadoPor: usuario.nome,
-          aprovadoEm:  aprovado_em,
-          carimboBase64: usuario.carimbo_url ?? null,
-          posicao: 'inferior-esquerdo', tamanho: 'pequeno',
-        })
-      }
+      // ALTERADO: não carimba mais aqui — a aprovação já limpa
+      // nota_pdf_path no banco (de propósito), então qualquer PDF
+      // carimbado nesse momento ficaria "órfão" (o banco não aponta
+      // mais pra ele). O carimbo agora acontece sob demanda, só
+      // quando alguém realmente for VER a nota (ver handleAbrirPdf).
 
       toast.success('Nota Fiscal autorizada.')
       fetchNotas()
@@ -456,9 +480,9 @@ export default function NotasFiscais() {
         <td className="px-4 py-3">
           <div className="flex items-center gap-1 justify-end">
             <button
-              onClick={() => handleAbrirPdf(n.nota_pdf_path, n.id)}
-              disabled={abrindoId === n.id || !n.nota_pdf_path}
-              title={n.nota_pdf_path ? 'Ver Nota Fiscal' : 'Nenhuma nota anexada'}
+              onClick={() => handleAbrirPdf(n.nota_pdf_path, n.id, 'nota')}
+              disabled={abrindoId === n.id}
+              title="Ver Nota Fiscal"
               className="p-1.5 rounded-lg text-gray-500 hover:text-brand-400 hover:bg-brand-500/10 transition-colors disabled:opacity-30"
             >
               <FileText size={13} />
