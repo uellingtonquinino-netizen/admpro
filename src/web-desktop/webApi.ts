@@ -1387,7 +1387,9 @@ const relatoriosRHApi = {
   },
 
   alojados: async (empresaId: number) => {
-    const { data, error } = await supabase.from('colaboradores').select('nome,funcao,setor,equipe,cidade,estado,telefone').eq('empresa_id', empresaId).eq('status', 'ativo').eq('alojado', 1).order('nome')
+    const { data, error } = await supabase.from('colaboradores')
+      .select('nome,funcao,setor,equipe,cidade,estado,telefone,tem_baixada,dias_periodo_baixada,data_vencimento_baixada')
+      .eq('empresa_id', empresaId).eq('status', 'ativo').eq('alojado', 1).order('nome')
     if (error) throw new Error(error.message)
     return data
   },

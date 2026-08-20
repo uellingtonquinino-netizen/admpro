@@ -63,6 +63,7 @@ export function runMigrations(db: Database.Database): void {
   if (applied < 46) { migration_046(db); markDone(db, 46) }
   if (applied < 47) { migration_047(db); markDone(db, 47) }
   if (applied < 48) { migration_048(db); markDone(db, 48) }
+  if (applied < 49) { migration_049(db); markDone(db, 49) }
 
   console.log('[DB] Migrations OK')
 }
@@ -1776,5 +1777,22 @@ function migration_048(db: Database.Database) {
   )
   if (!colunas.has('vai_assinatura')) {
     db.exec(`ALTER TABLE autorizacoes_pagamento_anexos ADD COLUMN vai_assinatura INTEGER NOT NULL DEFAULT 0`)
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// migration_049 — Período de trabalho (em dias) até a próxima
+// baixada, e a data calculada de vencimento — mesmo padrão de
+// dias_experiencia/data_vencimento_experiencia, que já existe.
+// ─────────────────────────────────────────────────────────
+function migration_049(db: Database.Database) {
+  const colunas = new Set(
+    (db.prepare(`PRAGMA table_info(colaboradores)`).all() as { name: string }[]).map(c => c.name)
+  )
+  if (!colunas.has('dias_periodo_baixada')) {
+    db.exec(`ALTER TABLE colaboradores ADD COLUMN dias_periodo_baixada INTEGER`)
+  }
+  if (!colunas.has('data_vencimento_baixada')) {
+    db.exec(`ALTER TABLE colaboradores ADD COLUMN data_vencimento_baixada TEXT`)
   }
 }

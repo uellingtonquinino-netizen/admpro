@@ -82,6 +82,8 @@ interface FormData {
   cor_raca:                      string
   alojado:                       boolean
   tem_baixada:                   boolean
+  dias_periodo_baixada:          string
+  data_vencimento_baixada:       string
   sexo:                          string
   naturalidade:                  string
   cbo:                           string
@@ -104,7 +106,7 @@ const EMPTY: FormData = {
   numero_calcado: '', salario_base: '', observacoes: '',
   titulo_numero: '', titulo_zona: '', titulo_secao: '', reservista: '',
   cnh_numero: '', cnh_categoria: '', cnh_vencimento: '', cor_raca: '',
-  alojado: false, tem_baixada: false,
+  alojado: false, tem_baixada: false, dias_periodo_baixada: '', data_vencimento_baixada: '',
   sexo: '', naturalidade: '', cbo: '', rg_data_emissao: '',
   ctps_data_expedicao: '', ctps_uf: '',
 }
@@ -211,6 +213,20 @@ export default function ColaboradorModal({ open, onClose, onSaved, onRefresh, co
     setForm(prev => (prev.data_vencimento_experiencia === iso ? prev : { ...prev, data_vencimento_experiencia: iso }))
   }, [form.data_admissao, form.dias_experiencia])
 
+  // NOVO: vencimento da baixada calculado automaticamente a partir da
+  // data de admissão + dias do período de trabalho — mesmo princípio
+  // do vencimento da experiência acima, só que só calcula se "Tem
+  // baixada" estiver marcado.
+  useEffect(() => {
+    if (!form.tem_baixada || !form.data_admissao || !form.dias_periodo_baixada) return
+    if (!/^\d{4}-\d{2}-\d{2}/.test(form.data_admissao)) return
+    const admissao = new Date(`${form.data_admissao}T00:00:00`)
+    if (Number.isNaN(admissao.getTime())) return
+    admissao.setDate(admissao.getDate() + Number(form.dias_periodo_baixada) - 1)
+    const iso = admissao.toISOString().slice(0, 10)
+    setForm(prev => (prev.data_vencimento_baixada === iso ? prev : { ...prev, data_vencimento_baixada: iso }))
+  }, [form.tem_baixada, form.data_admissao, form.dias_periodo_baixada])
+
   function set<K extends keyof FormData>(key: K, value: FormData[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
   }
@@ -261,6 +277,7 @@ export default function ColaboradorModal({ open, onClose, onSaved, onRefresh, co
       const payload = {
         ...form,
         dias_experiencia: form.dias_experiencia ? Number(form.dias_experiencia) : null,
+        dias_periodo_baixada: form.dias_periodo_baixada ? Number(form.dias_periodo_baixada) : null,
         salario_base:     parseMoeda(form.salario_base),
         valor_ida_volta:  form.valor_ida_volta  ? Number(form.valor_ida_volta.replace(',', '.'))  : null,
         alimentacao:      form.alimentacao      ? Number(form.alimentacao.replace(',', '.'))      : null,
@@ -408,6 +425,13 @@ export default function ColaboradorModal({ open, onClose, onSaved, onRefresh, co
           <input type="checkbox" checked={form.tem_baixada} onChange={e => set('tem_baixada', e.target.checked)} className="accent-brand-500 w-4 h-4" />
           Tem baixada
         </label>
+        {form.tem_baixada && (
+          <>
+            <Input label="Período de trabalho (dias)" type="number" value={form.dias_periodo_baixada} onChange={e => set('dias_periodo_baixada', e.target.value)} />
+            <Input label="Vencimento da baixada" type="date" value={form.data_vencimento_baixada} disabled
+              title="Calculado automaticamente a partir da admissão e dos dias do período de trabalho" />
+          </>
+        )}
       </Secao>
 
       <Secao title="Documentos adicionais">

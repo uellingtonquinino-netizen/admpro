@@ -77,9 +77,9 @@ export function registerRelatoriosRHIpc() {
 
   // ── 3. Alojados ──────────────────────────────────────────
   ipcMain.handle('relatoriosRH:alojados', async (_e, empresa_id: number) => {
-    if(getDatabaseProvider()==='supabase') { const {data,error}=await getSupabase().from('colaboradores').select('nome,funcao,setor,equipe,cidade,estado,telefone').eq('empresa_id',empresa_id).eq('status','ativo').eq('alojado',1).order('nome'); if(error)throw new Error(error.message); return data }
+    if(getDatabaseProvider()==='supabase') { const {data,error}=await getSupabase().from('colaboradores').select('nome,funcao,setor,equipe,cidade,estado,telefone,tem_baixada,dias_periodo_baixada,data_vencimento_baixada').eq('empresa_id',empresa_id).eq('status','ativo').eq('alojado',1).order('nome'); if(error)throw new Error(error.message); return data }
     return db.prepare(`
-      SELECT nome, funcao, setor, equipe, cidade, estado, telefone
+      SELECT nome, funcao, setor, equipe, cidade, estado, telefone, tem_baixada, dias_periodo_baixada, data_vencimento_baixada
       FROM colaboradores
       WHERE empresa_id = ? AND status = 'ativo' AND alojado = 1
       ORDER BY nome ASC

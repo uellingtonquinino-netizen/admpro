@@ -112,8 +112,11 @@ export default function RelatoriosRH() {
         ]))
       } else if (tipo === 'alojados') {
         const dados = await window.api.relatoriosRH.alojados(empresaId)
-        setColunas(['Nome', 'Função', 'Equipe', 'Cidade', 'Telefone'])
-        setLinhas(dados.map((c: any) => [c.nome, c.funcao ?? '—', c.equipe ?? '—', c.cidade ?? '—', c.telefone ?? '—']))
+        setColunas(['Nome', 'Função', 'Equipe', 'Cidade', 'Telefone', 'Vencimento Baixada'])
+        setLinhas(dados.map((c: any) => [
+          c.nome, c.funcao ?? '—', c.equipe ?? '—', c.cidade ?? '—', c.telefone ?? '—',
+          c.tem_baixada && c.data_vencimento_baixada ? formatDate(c.data_vencimento_baixada) : '—',
+        ]))
       } else if (tipo === 'afastados') {
         const dados = await window.api.relatoriosRH.afastados(empresaId)
         setColunas(['Nome', 'Função', 'Setor', 'Equipe', 'Admissão'])

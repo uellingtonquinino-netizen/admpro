@@ -82,12 +82,17 @@ export function gerarRelatorioVencimentoExperiencia(empresa: EmpresaInfo, itens:
 }
 
 export function gerarRelatorioAlojados(empresa: EmpresaInfo, itens: any[]): string {
-  const linhas = itens.map(c => [c.nome, c.funcao, c.equipe, `${c.cidade || ''}${c.estado ? ` - ${c.estado}` : ''}`, c.telefone])
+  // ALTERADO: coluna nova com o vencimento da baixada (quando a
+  // pessoa tem baixada configurada) — "—" pra quem não tem.
+  const linhas = itens.map(c => [
+    c.nome, c.funcao, c.equipe, `${c.cidade || ''}${c.estado ? ` - ${c.estado}` : ''}`, c.telefone,
+    c.tem_baixada && c.data_vencimento_baixada ? fmtData(c.data_vencimento_baixada) : '—',
+  ])
   return envolver(
     'Colaboradores Alojados',
     empresa,
     `${itens.length} colaborador(es)`,
-    tabela(['Nome', 'Função', 'Equipe', 'Cidade', 'Telefone'], linhas)
+    tabela(['Nome', 'Função', 'Equipe', 'Cidade', 'Telefone', 'Vencimento Baixada'], linhas)
   )
 }
 
