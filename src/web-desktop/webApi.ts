@@ -2351,12 +2351,23 @@ const documentosApi = {
   // não existe — abre o HTML numa aba nova e chama o print() do
   // próprio navegador (que também deixa "Salvar como PDF"), sem
   // precisar do serviço de PDF pra esse caso simples (sem anexo).
+  // CORRIGIDO: `document.write` numa aba em branco não estava sendo
+  // interpretado como HTML de verdade em alguns navegadores (mostrava
+  // o código fonte cru, com as tags visíveis, em vez de desenhar a
+  // página) — trocado por um Blob com tipo MIME explícito
+  // (text/html), que garante que o navegador sabe o que está abrindo.
   imprimir: async (p: { html: string; landscape?: boolean; nomeArquivo?: string }) => {
-    const janela = window.open('', '_blank')
-    if (!janela) return { ok: false }
-    janela.document.write(p.html)
-    janela.document.close()
-    janela.onload = () => { janela.focus(); janela.print() }
+    const blob = new Blob([p.html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const janela = window.open(url, '_blank')
+    if (!janela) { URL.revokeObjectURL(url); return { ok: false } }
+    janela.addEventListener('load', () => {
+      janela.focus()
+      janela.print()
+      // Espera um pouco antes de liberar a memória do Blob, pra dar
+      // tempo do diálogo de impressão terminar de ler o conteúdo.
+      setTimeout(() => URL.revokeObjectURL(url), 10000)
+    })
     return { ok: true }
   },
 
