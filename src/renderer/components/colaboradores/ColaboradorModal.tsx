@@ -83,6 +83,7 @@ interface FormData {
   alojado:                       boolean
   tem_baixada:                   boolean
   dias_periodo_baixada:          string
+  data_inicio_baixada:           string
   data_vencimento_baixada:       string
   sexo:                          string
   naturalidade:                  string
@@ -106,7 +107,7 @@ const EMPTY: FormData = {
   numero_calcado: '', salario_base: '', observacoes: '',
   titulo_numero: '', titulo_zona: '', titulo_secao: '', reservista: '',
   cnh_numero: '', cnh_categoria: '', cnh_vencimento: '', cor_raca: '',
-  alojado: false, tem_baixada: false, dias_periodo_baixada: '', data_vencimento_baixada: '',
+  alojado: false, tem_baixada: false, dias_periodo_baixada: '', data_inicio_baixada: '', data_vencimento_baixada: '',
   sexo: '', naturalidade: '', cbo: '', rg_data_emissao: '',
   ctps_data_expedicao: '', ctps_uf: '',
 }
@@ -213,19 +214,27 @@ export default function ColaboradorModal({ open, onClose, onSaved, onRefresh, co
     setForm(prev => (prev.data_vencimento_experiencia === iso ? prev : { ...prev, data_vencimento_experiencia: iso }))
   }, [form.data_admissao, form.dias_experiencia])
 
-  // NOVO: vencimento da baixada calculado automaticamente a partir da
-  // data de admissão + dias do período de trabalho — mesmo princípio
-  // do vencimento da experiência acima, só que só calcula se "Tem
-  // baixada" estiver marcado.
+  // NOVO: "Data para Baixada" começa igual à admissão (sugestão), mas
+  // é editável — só preenche sozinha enquanto a pessoa não tiver
+  // digitado nada nela. Uma vez que tenha algum valor (inclusive
+  // vindo do cadastro salvo), essa auto-preenchida para de mexer.
   useEffect(() => {
-    if (!form.tem_baixada || !form.data_admissao || !form.dias_periodo_baixada) return
-    if (!/^\d{4}-\d{2}-\d{2}/.test(form.data_admissao)) return
-    const admissao = new Date(`${form.data_admissao}T00:00:00`)
-    if (Number.isNaN(admissao.getTime())) return
-    admissao.setDate(admissao.getDate() + Number(form.dias_periodo_baixada) - 1)
-    const iso = admissao.toISOString().slice(0, 10)
+    if (!form.tem_baixada || !form.data_admissao || form.data_inicio_baixada) return
+    setForm(prev => (prev.data_inicio_baixada ? prev : { ...prev, data_inicio_baixada: form.data_admissao }))
+  }, [form.tem_baixada, form.data_admissao])
+
+  // ALTERADO: o vencimento da baixada agora conta a partir de "Data
+  // para Baixada" (editável, pode ser diferente da admissão — ex:
+  // mudou de função no meio do caminho), não mais direto da admissão.
+  useEffect(() => {
+    if (!form.tem_baixada || !form.data_inicio_baixada || !form.dias_periodo_baixada) return
+    if (!/^\d{4}-\d{2}-\d{2}/.test(form.data_inicio_baixada)) return
+    const inicio = new Date(`${form.data_inicio_baixada}T00:00:00`)
+    if (Number.isNaN(inicio.getTime())) return
+    inicio.setDate(inicio.getDate() + Number(form.dias_periodo_baixada) - 1)
+    const iso = inicio.toISOString().slice(0, 10)
     setForm(prev => (prev.data_vencimento_baixada === iso ? prev : { ...prev, data_vencimento_baixada: iso }))
-  }, [form.tem_baixada, form.data_admissao, form.dias_periodo_baixada])
+  }, [form.tem_baixada, form.data_inicio_baixada, form.dias_periodo_baixada])
 
   function set<K extends keyof FormData>(key: K, value: FormData[K]) {
     setForm(prev => ({ ...prev, [key]: value }))
@@ -427,9 +436,11 @@ export default function ColaboradorModal({ open, onClose, onSaved, onRefresh, co
         </label>
         {form.tem_baixada && (
           <>
+            <Input label="Data para Baixada" type="date" value={form.data_inicio_baixada} onChange={e => set('data_inicio_baixada', e.target.value)}
+              title="Data usada como base pro cálculo — vem preenchida com a admissão, mas pode ser mudada (ex: quando o período começa a contar de outra data)" />
             <Input label="Período de trabalho (dias)" type="number" value={form.dias_periodo_baixada} onChange={e => set('dias_periodo_baixada', e.target.value)} />
             <Input label="Vencimento da baixada" type="date" value={form.data_vencimento_baixada} disabled
-              title="Calculado automaticamente a partir da admissão e dos dias do período de trabalho" />
+              title="Calculado automaticamente a partir de Data para Baixada + dias do período de trabalho" />
           </>
         )}
       </Secao>

@@ -77,6 +77,7 @@ interface ColaboradorPayload {
   alojado?:                      boolean
   tem_baixada?:                  boolean
   dias_periodo_baixada?:         number | null
+  data_inicio_baixada?:          string | null
   data_vencimento_baixada?:      string | null
   matricula_esocial?:            string | null
   sexo?:                         string | null
@@ -108,7 +109,7 @@ const CAMPOS = [
   'tamanho_camisa', 'tamanho_calca', 'numero_calcado', 'observacoes',
   'titulo_numero', 'titulo_zona', 'titulo_secao', 'reservista',
   'cnh_numero', 'cnh_categoria', 'cnh_vencimento', 'cor_raca',
-  'alojado', 'tem_baixada', 'dias_periodo_baixada', 'data_vencimento_baixada', 'matricula_esocial',
+  'alojado', 'tem_baixada', 'dias_periodo_baixada', 'data_inicio_baixada', 'data_vencimento_baixada', 'matricula_esocial',
   'sexo', 'naturalidade', 'cbo', 'rg_data_emissao', 'ctps_data_expedicao', 'ctps_uf',
 ] as const
 

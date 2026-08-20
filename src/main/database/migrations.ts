@@ -64,6 +64,7 @@ export function runMigrations(db: Database.Database): void {
   if (applied < 47) { migration_047(db); markDone(db, 47) }
   if (applied < 48) { migration_048(db); markDone(db, 48) }
   if (applied < 49) { migration_049(db); markDone(db, 49) }
+  if (applied < 50) { migration_050(db); markDone(db, 50) }
 
   console.log('[DB] Migrations OK')
 }
@@ -1794,5 +1795,19 @@ function migration_049(db: Database.Database) {
   }
   if (!colunas.has('data_vencimento_baixada')) {
     db.exec(`ALTER TABLE colaboradores ADD COLUMN data_vencimento_baixada TEXT`)
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// migration_050 — Data que serve de base pro cálculo da baixada (nem
+// sempre é a mesma da admissão) — editável, só pré-preenchida com a
+// admissão como sugestão na tela.
+// ─────────────────────────────────────────────────────────
+function migration_050(db: Database.Database) {
+  const colunas = new Set(
+    (db.prepare(`PRAGMA table_info(colaboradores)`).all() as { name: string }[]).map(c => c.name)
+  )
+  if (!colunas.has('data_inicio_baixada')) {
+    db.exec(`ALTER TABLE colaboradores ADD COLUMN data_inicio_baixada TEXT`)
   }
 }
