@@ -1515,7 +1515,7 @@ const apApi = {
     if (error) throw new Error(error.message)
     if (p.anexos?.length) {
       const prontos = await garantirAnexosCaminhoStorage(p.empresa_id, `autorizacoes-pagamento/${apId}`, p.anexos)
-      const linhas = prontos.map((a, ordem) => ({ ap_id: apId, caminho: a.caminho, ordem }))
+      const linhas = prontos.map((a, ordem) => ({ ap_id: apId, caminho: a.caminho, ordem, vai_assinatura: a.vaiAssinatura ? 1 : 0 }))
       const { error: e2 } = await supabase.from('autorizacoes_pagamento_anexos').insert(linhas)
       if (e2) throw new Error(e2.message)
     }
