@@ -1202,6 +1202,167 @@ const lotesApi = {
     if (error) throw new Error(error.message)
     return { lotes: data ?? [] }
   },
+
+  // NOVO: completa o módulo (antes só tinha as 4 funções mais usadas
+  // na tela de AP — essas aqui são de MeusLotes, PainelSupervisor e
+  // do Escritório Central).
+  criar: async (p: { empresa_id: number; empresa_nome: string; data_inicio: string; data_fim: string; criado_por?: string | null; ap_ids: number[]; nf_ids: number[] }) => {
+    const { data, error } = await supabase.rpc('criar_lote_financeiro', { p })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  fecharLote: async (p: { empresa_id: number; empresa_nome: string; criado_por?: string | null; usuario_id?: number | null; ap_ids: number[]; nf_ids: number[] }) => {
+    const { data, error } = await supabase.rpc('fechar_lote_financeiro', { p })
+    if (error) throw new Error(error.message)
+    return data
+  },
+
+  excluir: async (id: number) => {
+    const { error } = await supabase.rpc('excluir_lote_financeiro', { p_lote_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  listarPorObra: async (empresaId: number) => {
+    const [{ data: lotes, error: e1 }, { data: aps, error: e2 }, { data: nfs, error: e3 }] = await Promise.all([
+      supabase.from('lotes_financeiros').select('*').eq('empresa_id', empresaId).order('data_inicio', { ascending: false }).order('id', { ascending: false }),
+      supabase.from('autorizacoes_pagamento').select('lote_id,aprovado_supervisor_por').eq('empresa_id', empresaId),
+      supabase.from('notas_fiscais').select('lote_id,aprovado_supervisor_por').eq('empresa_id', empresaId),
+    ])
+    for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+    return (lotes ?? []).map(l => {
+      const a = (aps ?? []).filter(x => x.lote_id === l.id), n = (nfs ?? []).filter(x => x.lote_id === l.id)
+      const total = a.length + n.length
+      const aprovados = a.filter(x => x.aprovado_supervisor_por !== null).length + n.filter(x => x.aprovado_supervisor_por !== null).length
+      return { ...l, total_itens: total, itens_aprovados: aprovados, pendente: aprovados < total }
+    })
+  },
+
+  buscarPorId: async (id: number) => {
+    const { data: lote, error } = await supabase.from('lotes_financeiros').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!lote) return null
+    const [{ data: aps, error: e1 }, { data: nfs, error: e2 }] = await Promise.all([
+      supabase.from('autorizacoes_pagamento').select('*').eq('lote_id', id).order('id', { ascending: false }),
+      supabase.from('notas_fiscais').select('*').eq('lote_id', id).order('id', { ascending: false }),
+    ])
+    if (e1) throw new Error(e1.message)
+    if (e2) throw new Error(e2.message)
+    const apIds = (aps ?? []).map(a => a.id), nfIds = (nfs ?? []).map(n => n.id)
+    const [{ data: ab, error: e3 }, { data: nb, error: e4 }] = await Promise.all([
+      apIds.length ? supabase.from('autorizacoes_pagamento_boletos').select('ap_id,id,valor').in('ap_id', apIds) : Promise.resolve({ data: [] as any[], error: null }),
+      nfIds.length ? supabase.from('notas_fiscais_boletos').select('nota_id,id,valor').in('nota_id', nfIds) : Promise.resolve({ data: [] as any[], error: null }),
+    ])
+    if (e3) throw new Error(e3.message)
+    if (e4) throw new Error(e4.message)
+    const autorizacoes = (aps ?? []).map(a => {
+      const b = (ab ?? []).filter(x => x.ap_id === a.id)
+      return { ...a, valor_total: b.length ? b.reduce((x, y) => x + Number(y.valor), 0) : Number(a.valor), qtd_boletos: b.length }
+    })
+    const notas_fiscais = (nfs ?? []).map(n => {
+      const b = (nb ?? []).filter(x => x.nota_id === n.id)
+      return { ...n, valor_total: b.reduce((x, y) => x + Number(y.valor), 0), qtd_boletos: b.length }
+    })
+    return { ...lote, autorizacoes, notas_fiscais }
+  },
+
+  listarSupervisores: async () => {
+    const [{ data: usuariosRows, error: e1 }, { data: links, error: e2 }, { data: lotesRows, error: e3 }, { data: aps, error: e4 }, { data: nfs, error: e5 }] = await Promise.all([
+      supabase.from('usuarios').select('id,nome').eq('perfil', 'supervisor').eq('ativo', 1).order('nome'),
+      supabase.from('supervisor_obras').select('usuario_id,empresa_id'),
+      supabase.from('lotes_financeiros').select('id,empresa_id'),
+      supabase.from('autorizacoes_pagamento').select('lote_id,aprovado_supervisor_por,aprovado_central_por'),
+      supabase.from('notas_fiscais').select('lote_id,aprovado_supervisor_por,aprovado_central_por'),
+    ])
+    for (const e of [e1, e2, e3, e4, e5]) if (e) throw new Error(e.message)
+    return (usuariosRows ?? []).map(u => {
+      const obras = (links ?? []).filter(l => l.usuario_id === u.id).map(l => l.empresa_id)
+      const loteIds = new Set((lotesRows ?? []).filter(l => obras.includes(l.empresa_id)).map(l => l.id))
+      const pendentes = new Set([
+        ...(aps ?? []).filter(a => loteIds.has(a.lote_id) && a.aprovado_supervisor_por !== null && a.aprovado_central_por === null).map(a => a.lote_id),
+        ...(nfs ?? []).filter(n => loteIds.has(n.lote_id) && n.aprovado_supervisor_por !== null && n.aprovado_central_por === null).map(n => n.lote_id),
+      ])
+      return { usuario_id: u.id, nome: u.nome, total_obras: obras.length, lotes_pendentes: pendentes.size }
+    })
+  },
+
+  obrasDoSupervisor: async (usuarioId: number) => {
+    const { data: links, error } = await supabase.from('supervisor_obras').select('empresa_id').eq('usuario_id', usuarioId)
+    if (error) throw new Error(error.message)
+    const ids = (links ?? []).map(x => x.empresa_id)
+    if (!ids.length) return []
+    const [{ data: empresasRows, error: e1 }, { data: colaboradoresRows, error: e2 }, { data: lancamentosRows, error: e3 }, { data: lotesRows, error: e4 }, { data: aps, error: e5 }, { data: nfs, error: e6 }] = await Promise.all([
+      supabase.from('empresas').select('id,nome,logo_url').in('id', ids),
+      supabase.from('colaboradores').select('empresa_id,status').in('empresa_id', ids),
+      supabase.from('lancamentos').select('empresa_id,tipo,status,valor,data').in('empresa_id', ids),
+      supabase.from('lotes_financeiros').select('id,empresa_id').in('empresa_id', ids),
+      supabase.from('autorizacoes_pagamento').select('lote_id,aprovado_supervisor_por').in('empresa_id', ids),
+      supabase.from('notas_fiscais').select('lote_id,aprovado_supervisor_por').in('empresa_id', ids),
+    ])
+    for (const e of [e1, e2, e3, e4, e5, e6]) if (e) throw new Error(e.message)
+    const inicio = new Date(); inicio.setDate(1)
+    const mes = inicio.toISOString().slice(0, 10)
+    return (empresasRows ?? []).map(e => {
+      const loteIds = new Set((lotesRows ?? []).filter(l => l.empresa_id === e.id).map(l => l.id))
+      return {
+        empresa_id: e.id, empresa_nome: e.nome, logo_url: e.logo_url,
+        colaboradores: (colaboradoresRows ?? []).filter(c => c.empresa_id === e.id && c.status === 'ativo').length,
+        gastos_mes: (lancamentosRows ?? []).filter(l => l.empresa_id === e.id && l.tipo === 'despesa' && l.status !== 'cancelado' && l.data >= mes).reduce((x, l) => x + Number(l.valor), 0),
+        lotes_pendentes: (aps ?? []).filter(a => loteIds.has(a.lote_id) && a.aprovado_supervisor_por !== null).length + (nfs ?? []).filter(n => loteIds.has(n.lote_id) && n.aprovado_supervisor_por !== null).length,
+      }
+    })
+  },
+
+  apsParaCapa: async (loteId: number) => {
+    const { data: aps, error } = await supabase.from('autorizacoes_pagamento').select('*').eq('lote_id', loteId).order('id')
+    if (error) throw new Error(error.message)
+    const ids = (aps ?? []).map(a => a.id)
+    const [{ data: boletos, error: e1 }, { data: fornecedoresRows, error: e2 }, { data: colaboradoresRows, error: e3 }] = await Promise.all([
+      ids.length ? supabase.from('autorizacoes_pagamento_boletos').select('ap_id,valor,vencimento').in('ap_id', ids) : Promise.resolve({ data: [] as any[], error: null }),
+      supabase.from('fornecedores').select('id,cnpj,cpf,forma_pagamento,banco,agencia,operacao,conta,conta_digito'),
+      supabase.from('colaboradores').select('id,cpf,banco,agencia,operacao,conta,conta_digito'),
+    ])
+    for (const e of [e1, e2, e3]) if (e) throw new Error(e.message)
+    const fs = new Map((fornecedoresRows ?? []).map(f => [f.id, f])), cs = new Map((colaboradoresRows ?? []).map(c => [c.id, c]))
+    return (aps ?? []).map(a => {
+      const b = (boletos ?? []).filter(x => x.ap_id === a.id)
+      const r: any = a.beneficiario_tipo === 'fornecedor' ? fs.get(a.beneficiario_id) : cs.get(a.beneficiario_id)
+      return {
+        id: a.id, created_at: a.created_at, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
+        cnpj: a.beneficiario_tipo === 'fornecedor' ? r?.cnpj ?? null : null, cpf: r?.cpf ?? null,
+        forma_pagamento: a.beneficiario_tipo === 'fornecedor' ? r?.forma_pagamento ?? null : null,
+        banco: r?.banco ?? null, agencia: r?.agencia ?? null, operacao: r?.operacao ?? null,
+        conta: r?.conta ?? null, conta_digito: r?.conta_digito ?? null,
+        primeiro_vencimento: b[0]?.vencimento ?? null, valor_total: b.length ? b.reduce((x, y) => x + Number(y.valor), 0) : Number(a.valor),
+      }
+    })
+  },
+
+  resumoObras: async (empresaIds: number[]) => {
+    if (empresaIds.length === 0) return []
+    const [{ data: empresasRows, error: e1 }, { data: colaboradoresRows, error: e2 }, { data: lancamentosRows, error: e3 }, { data: lotesRows, error: e4 }, { data: aps, error: e5 }, { data: nfs, error: e6 }] = await Promise.all([
+      supabase.from('empresas').select('id,nome,logo_url').in('id', empresaIds),
+      supabase.from('colaboradores').select('empresa_id,status').in('empresa_id', empresaIds),
+      supabase.from('lancamentos').select('empresa_id,tipo,status,valor,data').in('empresa_id', empresaIds),
+      supabase.from('lotes_financeiros').select('id,empresa_id').in('empresa_id', empresaIds),
+      supabase.from('autorizacoes_pagamento').select('lote_id,aprovado_supervisor_por').in('empresa_id', empresaIds),
+      supabase.from('notas_fiscais').select('lote_id,aprovado_supervisor_por').in('empresa_id', empresaIds),
+    ])
+    for (const e of [e1, e2, e3, e4, e5, e6]) if (e) throw new Error(e.message)
+    const inicio = new Date(); inicio.setDate(1)
+    const mes = inicio.toISOString().slice(0, 10)
+    return (empresasRows ?? []).map(e => {
+      const loteIds = new Set((lotesRows ?? []).filter(l => l.empresa_id === e.id).map(l => l.id))
+      const pendentes = (aps ?? []).filter(a => loteIds.has(a.lote_id) && a.aprovado_supervisor_por === null).length + (nfs ?? []).filter(n => loteIds.has(n.lote_id) && n.aprovado_supervisor_por === null).length
+      return {
+        empresa_id: e.id, empresa_nome: e.nome, logo_url: e.logo_url,
+        colaboradores: (colaboradoresRows ?? []).filter(c => c.empresa_id === e.id && c.status === 'ativo').length,
+        gastos_mes: (lancamentosRows ?? []).filter(l => l.empresa_id === e.id && l.tipo === 'despesa' && l.status !== 'cancelado' && l.data >= mes).reduce((x, l) => x + Number(l.valor), 0),
+        lotes_pendentes: pendentes,
+      }
+    })
+  },
 }
 
 // NOVO: usado nas telas de Categorias e Lançamentos — mesma lógica
