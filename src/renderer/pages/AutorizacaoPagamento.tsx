@@ -393,11 +393,12 @@ export default function AutorizacaoPagamento() {
   // NOVO: gera a mesma "capa" (planilha com todas as colunas e o
   // total no final) que já existe na tela de lote — só que aqui pra
   // qualquer seleção de AP's, sem precisar ter enviado pro Supervisor.
-  async function handleGerarCapa() {
-    if (!empresaId || selecionados.size === 0) return
+  async function handleGerarCapa(idsExplicitos?: number[]) {
+    const ids = idsExplicitos ?? Array.from(selecionados)
+    if (!empresaId || ids.length === 0) return
     setGerandoCapa(true)
     try {
-      const dados = await window.api.ap.capaPorIds(Array.from(selecionados))
+      const dados = await window.api.ap.capaPorIds(ids)
       if (dados.length === 0) { toast.error('Não foi possível carregar as AP\'s selecionadas.'); return }
 
       const itens: ApCapaItem[] = dados.map((d: any, i: number) => ({
@@ -659,7 +660,7 @@ export default function AutorizacaoPagamento() {
         </div>
         <div className="flex items-center gap-2">
           {selecionados.size > 0 && (
-            <Button variant="outline" icon={<FileText size={15} />} onClick={handleGerarCapa} loading={gerandoCapa}>
+            <Button variant="outline" icon={<FileText size={15} />} onClick={() => handleGerarCapa()} loading={gerandoCapa}>
               Gerar Capa ({selecionados.size})
             </Button>
           )}
@@ -784,6 +785,13 @@ export default function AutorizacaoPagamento() {
                   Enviar para Supervisor
                 </Button>
               )}
+              <Button
+                size="sm" variant="outline" icon={<FileText size={13} />}
+                onClick={() => handleGerarCapa(itensDesseLote.map(a => a.id))}
+                loading={gerandoCapa}
+              >
+                Gerar Capa
+              </Button>
             </div>
             {expandido && (
               <div className="border-t border-brand-500/20 overflow-x-auto">
