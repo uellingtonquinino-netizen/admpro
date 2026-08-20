@@ -109,7 +109,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const bytesFinais = await documentoFinal.save()
 
     // ── 3. Sobe pro Storage ─────────────────────────────────
-    const nomeSanitizado = p.nomeArquivo.replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 120) || 'documento'
+    // CORRIGIDO: a limpeza antiga só tirava caracteres proibidos no
+    // Windows — mas a "chave" de um arquivo no Storage do Supabase é
+    // bem mais restrita (não aceita espaço nem acento, por exemplo).
+    // Um nome como "Aviso Prévio Indenizado - Fulano" já dava erro
+    // ("Invalid key"). Agora só permite letra, número, ponto,
+    // hífen e underscore — troca acento pela letra sem acento antes
+    // de filtrar, então "Prévio" vira "Previo", não desaparece.
+    const nomeSanitizado = p.nomeArquivo
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/_+/g, '_')
+      .slice(0, 120) || 'documento'
     const remoto = `${p.empresa_id}/${p.pastaId}/${Date.now()}-${nomeSanitizado}.pdf`
     const caminhoFinal = await subirDocumentoBuffer(supabase, remoto, bytesFinais)
 
