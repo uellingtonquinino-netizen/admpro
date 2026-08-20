@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient'
+import { VERSAO_CONTRATO, preencherContrato } from '../main/ipc/contratoTemplate'
 
 // NOVO: primeira peça do window.api pro build web-desktop — replica,
 // falando direto com o Supabase (sem processo do Electron no meio), o
@@ -2707,4 +2708,41 @@ const documentosApi = {
   },
 }
 
-export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi }
+// NOVO: Contrato de Prestação de Serviços — mesma lógica de
+// contratos.ipc.ts, reaproveitando o texto de contratoTemplate.ts
+// direto (sem duplicar).
+const contratosApi = {
+  buscarOuCriar: async (empresaId: number) => {
+    const { data: existente, error: erroBusca } = await supabase
+      .from('contratos').select('*').eq('empresa_id', empresaId)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (erroBusca) throw new Error(erroBusca.message)
+    if (existente && existente.versao === VERSAO_CONTRATO) return existente
+
+    const { data: empresa, error: erroEmpresa } = await supabase
+      .from('empresas').select('razao_social, nome, cnpj, valor_mensalidade').eq('id', empresaId).single()
+    if (erroEmpresa) throw new Error(erroEmpresa.message)
+
+    const texto = preencherContrato({
+      nome_empresa: empresa.razao_social || empresa.nome,
+      cnpj_empresa: empresa.cnpj, valor_mensalidade: Number(empresa.valor_mensalidade ?? 0),
+    })
+
+    const { data: novo, error: erroInsert } = await supabase.from('contratos').insert({
+      empresa_id: empresaId, versao: VERSAO_CONTRATO, texto_completo: texto, status: 'pendente',
+    }).select('*').single()
+    if (erroInsert) throw new Error(erroInsert.message)
+    return novo
+  },
+
+  assinar: async (p: { contrato_id: number; nome_completo: string; usuario_id: number }) => {
+    const { error } = await supabase.from('contratos').update({
+      status: 'assinado', assinado_por_nome: p.nome_completo,
+      assinado_por_usuario_id: p.usuario_id, data_assinatura: new Date().toISOString(),
+    }).eq('id', p.contrato_id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+}
+
+export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi, contratos: contratosApi }
