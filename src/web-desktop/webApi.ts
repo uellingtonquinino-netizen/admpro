@@ -2840,4 +2840,165 @@ const obraEapApi = {
   },
 }
 
-export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi, contratos: contratosApi, obraEap: obraEapApi }
+// NOVO: módulo Obra — Diário de Obra (RDO) — mesma lógica de
+// obraDiario.ipc.ts. Fotos: no desktop, "fotos" vem como lista de
+// caminhos locais (do diálogo nativo) ou já supabase:// (existente).
+// Na web não existe "caminho local" — o formulário passa File[]
+// direto (do seletor de arquivo do navegador) pras fotos NOVAS, e
+// string supabase:// pras já existentes.
+interface FotoPayloadWeb {
+  caminho: string | File  // File = nova (precisa subir); string = já existe (supabase://)
+  legenda: string | null
+}
+interface AtividadePayloadWeb {
+  eap_item_id: number; percentual_incremento: number; observacao: string | null; fotos: FotoPayloadWeb[]
+}
+interface DiarioPayloadWeb {
+  id?: number; empresa_id: number; data: string; clima: string | null; condicao_trabalho: string | null
+  mao_de_obra_presente: string | null; ocorrencias: string | null
+  criado_por: string | null; criado_por_usuario_id: number | null
+  atividades: AtividadePayloadWeb[]
+}
+
+async function subirFotosNovasWeb(empresaId: number, diarioId: number, atividadeIndex: number, fotos: FotoPayloadWeb[]) {
+  const resultado: { caminho: string; legenda: string | null }[] = []
+  for (const foto of fotos) {
+    if (typeof foto.caminho === 'string') { resultado.push({ caminho: foto.caminho, legenda: foto.legenda }); continue }
+    const arquivo = foto.caminho
+    const remoto = `${empresaId}/diario-obra/${diarioId}/${atividadeIndex}/${Date.now()}-${arquivo.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const { error } = await supabase.storage.from('documentos-rh').upload(remoto, arquivo)
+    if (error) throw new Error(error.message)
+    resultado.push({ caminho: `supabase://documentos-rh/${remoto}`, legenda: foto.legenda })
+  }
+  return resultado
+}
+
+async function buscarDiarioCompleto(diario: any) {
+  if (!diario) return null
+  const { data: atividades, error } = await supabase.from('obra_diario_atividades').select('*').eq('diario_id', diario.id)
+  if (error) throw new Error(error.message)
+  const comFotos = []
+  for (const a of atividades ?? []) {
+    const { data: fotos, error: e2 } = await supabase.from('obra_diario_fotos').select('*').eq('atividade_id', a.id)
+    if (e2) throw new Error(e2.message)
+    comFotos.push({ ...a, fotos: fotos ?? [] })
+  }
+  return { ...diario, atividades: comFotos }
+}
+
+const obraDiarioApi = {
+  // NOVO: no desktop abre o diálogo nativo. Na web, abre o seletor
+  // de arquivo do navegador (múltiplas imagens) e devolve os File
+  // escolhidos — o salvar() abaixo é quem sabe subir cada um.
+  selecionarFotos: async (): Promise<File[]> => {
+    return new Promise(resolve => {
+      const input = document.createElement('input')
+      input.type = 'file'; input.accept = 'image/*'; input.multiple = true; input.style.display = 'none'
+      input.onchange = () => { resolve(Array.from(input.files ?? [])); input.remove() }
+      document.body.appendChild(input); input.click()
+    })
+  },
+
+  urlFoto: async (caminho: string) => {
+    if (!caminho.startsWith('supabase://')) return caminho
+    const semPrefixo = caminho.replace(/^supabase:\/\//, '')
+    const { data, error } = await supabase.storage.from('documentos-rh').createSignedUrl(semPrefixo, 3600)
+    if (error) throw new Error(error.message)
+    return data.signedUrl
+  },
+
+  listar: async (empresaId: number) => {
+    const { data: diarios, error } = await supabase.from('obra_diarios').select('*').eq('empresa_id', empresaId).order('data', { ascending: false })
+    if (error) throw new Error(error.message)
+    const resultado = []
+    for (const d of diarios ?? []) {
+      const { count } = await supabase.from('obra_diario_atividades').select('id', { count: 'exact', head: true }).eq('diario_id', d.id)
+      resultado.push({ ...d, quantidade_atividades: count ?? 0 })
+    }
+    return resultado
+  },
+
+  buscarPorData: async (p: { empresa_id: number; data: string }) => {
+    const { data: diario, error } = await supabase.from('obra_diarios').select('*').eq('empresa_id', p.empresa_id).eq('data', p.data).maybeSingle()
+    if (error) throw new Error(error.message)
+    return buscarDiarioCompleto(diario)
+  },
+
+  buscarPorId: async (id: number) => {
+    const { data: diario, error } = await supabase.from('obra_diarios').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    return buscarDiarioCompleto(diario)
+  },
+
+  percentuaisAcumulados: async (empresaId: number) => {
+    const { data: diarios, error } = await supabase.from('obra_diarios').select('id').eq('empresa_id', empresaId)
+    if (error) throw new Error(error.message)
+    const diarioIds = (diarios ?? []).map(d => d.id)
+    if (diarioIds.length === 0) return {}
+    const { data: atividades, error: e2 } = await supabase.from('obra_diario_atividades').select('eap_item_id,percentual_incremento').in('diario_id', diarioIds)
+    if (e2) throw new Error(e2.message)
+    const totais: Record<number, number> = {}
+    for (const a of atividades ?? []) totais[a.eap_item_id] = (totais[a.eap_item_id] ?? 0) + Number(a.percentual_incremento)
+    return totais
+  },
+
+  todasAtividades: async (empresaId: number) => {
+    const { data: diarios, error } = await supabase.from('obra_diarios').select('id,data').eq('empresa_id', empresaId).order('data')
+    if (error) throw new Error(error.message)
+    const dataPorDiarioId = new Map((diarios ?? []).map(d => [d.id, d.data]))
+    const diarioIds = [...dataPorDiarioId.keys()]
+    if (diarioIds.length === 0) return []
+    const { data: atividades, error: e2 } = await supabase.from('obra_diario_atividades').select('diario_id,eap_item_id,percentual_incremento').in('diario_id', diarioIds)
+    if (e2) throw new Error(e2.message)
+    return (atividades ?? []).map(a => ({ data: dataPorDiarioId.get(a.diario_id), eap_item_id: a.eap_item_id, percentual_incremento: a.percentual_incremento }))
+  },
+
+  salvar: async (p: DiarioPayloadWeb) => {
+    let diarioId = p.id
+    if (diarioId) {
+      const { error } = await supabase.from('obra_diarios').update({
+        clima: p.clima, condicao_trabalho: p.condicao_trabalho,
+        mao_de_obra_presente: p.mao_de_obra_presente, ocorrencias: p.ocorrencias,
+        updated_at: new Date().toISOString(),
+      }).eq('id', diarioId)
+      if (error) throw new Error(error.message)
+      const { error: e2 } = await supabase.from('obra_diario_atividades').delete().eq('diario_id', diarioId)
+      if (e2) throw new Error(e2.message)
+    } else {
+      const { data: novo, error } = await supabase.from('obra_diarios').insert({
+        empresa_id: p.empresa_id, data: p.data, clima: p.clima, condicao_trabalho: p.condicao_trabalho,
+        mao_de_obra_presente: p.mao_de_obra_presente, ocorrencias: p.ocorrencias,
+        criado_por: p.criado_por, criado_por_usuario_id: p.criado_por_usuario_id,
+      }).select('id').single()
+      if (error) throw new Error(error.message)
+      diarioId = novo.id
+    }
+    if (diarioId === undefined) throw new Error('Erro interno: diário sem id definido.')
+
+    for (let i = 0; i < p.atividades.length; i++) {
+      const ativ = p.atividades[i]
+      const { data: novaAtividade, error } = await supabase.from('obra_diario_atividades').insert({
+        diario_id: diarioId, eap_item_id: ativ.eap_item_id,
+        percentual_incremento: ativ.percentual_incremento, observacao: ativ.observacao,
+      }).select('id').single()
+      if (error) throw new Error(error.message)
+
+      const fotosProntas = await subirFotosNovasWeb(p.empresa_id, diarioId, i, ativ.fotos)
+      if (fotosProntas.length) {
+        const { error: e2 } = await supabase.from('obra_diario_fotos').insert(
+          fotosProntas.map(f => ({ atividade_id: novaAtividade.id, caminho: f.caminho, legenda: f.legenda }))
+        )
+        if (e2) throw new Error(e2.message)
+      }
+    }
+    return { id: diarioId }
+  },
+
+  excluir: async (id: number) => {
+    const { error } = await supabase.from('obra_diarios').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+}
+
+export const webApi = { usuarios, empresas, auth, app: appApi, supabase: supabaseStatus, faturas: faturasApi, notificacoes: notificacoesApi, folhaPagamento: folhaPagamentoApi, lancamentos: lancamentosApi, colaboradores: colaboradoresApi, importacao: importacaoApi, produtos: produtosApi, fornecedores: fornecedoresApi, relatoriosRH: relatoriosRHApi, relatorios: relatoriosApi, opcoes: opcoesApi, ap: apApi, lotes: lotesApi, categorias: categoriasApi, contas: contasApi, contasAPagar: contasAPagarApi, contasAReceber: contasAReceberApi, recibos: recibosApi, pessoasAvulsas: pessoasAvulsasApi, master: masterApi, notasFiscais: notasFiscaisApi, almoxarifadoEntradas: almoxarifadoEntradasApi, almoxarifadoSaidas: almoxarifadoSaidasApi, solicitacoesPessoal: solicitacoesPessoalApi, exportacao: exportacaoApi, supervisor: supervisorApi, documentos: documentosApi, contratos: contratosApi, obraEap: obraEapApi, obraDiario: obraDiarioApi }
