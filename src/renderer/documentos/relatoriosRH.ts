@@ -81,6 +81,24 @@ export function gerarRelatorioVencimentoExperiencia(empresa: EmpresaInfo, itens:
   )
 }
 
+// NOVO: relatório específico de vencimento de baixada — pra
+// organizar quem precisa ir/voltar em qual data, junto do valor de
+// ida e volta e alimentação de cada um.
+export function gerarRelatorioVencimentoBaixada(empresa: EmpresaInfo, itens: any[], periodo: string): string {
+  const linhas = itens.map(c => [
+    c.nome, c.cpf || '—', c.cidade || '—',
+    c.valor_ida_volta != null ? `R$ ${Number(c.valor_ida_volta).toFixed(2).replace('.', ',')}` : '—',
+    c.alimentacao != null ? `R$ ${Number(c.alimentacao).toFixed(2).replace('.', ',')}` : '—',
+    fmtData(c.data_vencimento_baixada),
+  ])
+  return envolver(
+    'Vencimento de Baixada',
+    empresa,
+    `${periodo} — ${itens.length} colaborador(es)`,
+    tabela(['Nome', 'CPF', 'Cidade', 'Ida e Volta', 'Alimentação', 'Vencimento'], linhas)
+  )
+}
+
 export function gerarRelatorioAlojados(empresa: EmpresaInfo, itens: any[]): string {
   // ALTERADO: coluna nova com o vencimento da baixada (quando a
   // pessoa tem baixada configurada) — "—" pra quem não tem.

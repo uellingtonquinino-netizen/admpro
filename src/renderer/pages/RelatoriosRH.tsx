@@ -11,19 +11,20 @@ import { SkeletonTable }        from '@components/ui/Skeleton'
 import EmptyState               from '@components/ui/EmptyState'
 import {
   gerarRelatorioColaboradoresAtivos, gerarRelatorioPorAdmissao, gerarRelatorioVencimentoExperiencia,
-  gerarRelatorioAlojados, gerarRelatorioAfastados, gerarRelatorioInativos,
+  gerarRelatorioAlojados, gerarRelatorioVencimentoBaixada, gerarRelatorioAfastados, gerarRelatorioInativos,
   gerarRelatorioAniversariantes, gerarRelatorioMovimentacao,
   gerarRelatorioPorSetor, gerarRelatorioContasBancarias,
 } from '../documentos/relatoriosRH'
 import { FileText, ClipboardList } from 'lucide-react'
 
-type TipoRelatorio = 'ativos' | 'porAdmissao' | 'experiencia' | 'alojados' | 'afastados' | 'inativos' | 'aniversariantes' | 'movimentacao' | 'setor' | 'contas'
+type TipoRelatorio = 'ativos' | 'porAdmissao' | 'experiencia' | 'alojados' | 'vencimentoBaixada' | 'afastados' | 'inativos' | 'aniversariantes' | 'movimentacao' | 'setor' | 'contas'
 
 const TIPOS: { value: TipoRelatorio; label: string }[] = [
   { value: 'ativos',          label: 'Colaboradores ativos' },
   { value: 'porAdmissao',     label: 'Por data de admissão' },
   { value: 'experiencia',     label: 'Vencimento de experiência' },
   { value: 'alojados',        label: 'Alojados' },
+  { value: 'vencimentoBaixada', label: 'Vencimento de Baixada' },
   { value: 'afastados',       label: 'Afastados' },
   { value: 'inativos',        label: 'Inativos' },
   { value: 'aniversariantes', label: 'Aniversariantes do mês' },
@@ -64,6 +65,12 @@ export default function RelatoriosRH() {
   const [contasFim, setContasFim]       = useState('')
   const [admInicio, setAdmInicio] = useState(() => hoje.slice(0, 4) + '-01-01')
   const [admFim, setAdmFim]       = useState(hoje)
+  const [baixadaInicio, setBaixadaInicio] = useState(hoje)
+  const [baixadaFim, setBaixadaFim] = useState(() => {
+    const d = new Date()
+    d.setDate(d.getDate() + 30)
+    return d.toISOString().slice(0, 10)
+  })
 
   const [colunas, setColunas] = useState<string[]>([])
   const [linhas, setLinhas]   = useState<string[][]>([])
@@ -89,6 +96,8 @@ export default function RelatoriosRH() {
     const contasFimUsado    = overrideFim ?? contasFim
     const admInicioUsado = overrideInicio ?? admInicio
     const admFimUsado    = overrideFim ?? admFim
+    const baixadaInicioUsado = overrideInicio ?? baixadaInicio
+    const baixadaFimUsado    = overrideFim ?? baixadaFim
     setLoading(true)
     try {
       if (tipo === 'ativos') {
@@ -116,6 +125,17 @@ export default function RelatoriosRH() {
         setLinhas(dados.map((c: any) => [
           c.nome, c.funcao ?? '—', c.equipe ?? '—', c.cidade ?? '—', c.telefone ?? '—',
           c.tem_baixada && c.data_vencimento_baixada ? formatDate(c.data_vencimento_baixada) : '—',
+        ]))
+      } else if (tipo === 'vencimentoBaixada') {
+        const dados = await window.api.relatoriosRH.vencimentoBaixada({
+          empresa_id: empresaId, inicio: baixadaInicioUsado, fim: baixadaFimUsado,
+        })
+        setColunas(['Nome', 'CPF', 'Cidade', 'Ida e Volta', 'Alimentação', 'Vencimento'])
+        setLinhas(dados.map((c: any) => [
+          c.nome, c.cpf ?? '—', c.cidade ?? '—',
+          c.valor_ida_volta != null ? `R$ ${Number(c.valor_ida_volta).toFixed(2).replace('.', ',')}` : '—',
+          c.alimentacao != null ? `R$ ${Number(c.alimentacao).toFixed(2).replace('.', ',')}` : '—',
+          formatDate(c.data_vencimento_baixada),
         ]))
       } else if (tipo === 'afastados') {
         const dados = await window.api.relatoriosRH.afastados(empresaId)
@@ -181,6 +201,11 @@ export default function RelatoriosRH() {
       } else if (tipo === 'alojados') {
         const dados = await window.api.relatoriosRH.alojados(empresaId)
         html = gerarRelatorioAlojados(empresaAtual, dados)
+      } else if (tipo === 'vencimentoBaixada') {
+        const dados = await window.api.relatoriosRH.vencimentoBaixada({
+          empresa_id: empresaId, inicio: baixadaInicio, fim: baixadaFim,
+        })
+        html = gerarRelatorioVencimentoBaixada(empresaAtual, dados, `${formatDate(baixadaInicio)} a ${formatDate(baixadaFim)}`)
       } else if (tipo === 'afastados') {
         const dados = await window.api.relatoriosRH.afastados(empresaId)
         html = gerarRelatorioAfastados(empresaAtual, dados)
@@ -254,6 +279,14 @@ export default function RelatoriosRH() {
             />
           )}
 
+          {tipo === 'vencimentoBaixada' && (
+            <FiltroPeriodo
+              dataInicio={baixadaInicio}
+              dataFim={baixadaFim}
+              onBuscar={(i, f) => { setBaixadaInicio(i); setBaixadaFim(f); buscar(i, f) }}
+            />
+          )}
+
           {tipo === 'porAdmissao' && (
             <FiltroPeriodo
               dataInicio={admInicio}
@@ -297,7 +330,7 @@ export default function RelatoriosRH() {
             </div>
           )}
 
-          {tipo !== 'experiencia' && tipo !== 'movimentacao' && tipo !== 'contas' && tipo !== 'porAdmissao' && (
+          {tipo !== 'experiencia' && tipo !== 'vencimentoBaixada' && tipo !== 'movimentacao' && tipo !== 'contas' && tipo !== 'porAdmissao' && (
             <Button variant="outline" onClick={() => buscar()}>Filtrar</Button>
           )}
         </div>

@@ -1394,6 +1394,21 @@ const relatoriosRHApi = {
     return data
   },
 
+  // NOVO: relatório específico de vencimento de baixada — pedido do
+  // usuário, mesmo princípio do vencimento de experiência (filtro por
+  // período, tela pergunta início/fim), com os campos financeiros da
+  // ida/volta e alimentação junto.
+  vencimentoBaixada: async (p: { empresa_id: number; inicio: string; fim: string }) => {
+    const { data, error } = await supabase.from('colaboradores')
+      .select('nome,cpf,cidade,valor_ida_volta,alimentacao,data_vencimento_baixada')
+      .eq('empresa_id', p.empresa_id).eq('status', 'ativo').eq('tem_baixada', 1)
+      .not('data_vencimento_baixada', 'is', null)
+      .gte('data_vencimento_baixada', p.inicio).lte('data_vencimento_baixada', p.fim)
+      .order('data_vencimento_baixada')
+    if (error) throw new Error(error.message)
+    return data ?? []
+  },
+
   afastados: async (empresaId: number) => {
     const { data, error } = await supabase.from('colaboradores').select('nome,funcao,setor,equipe,data_admissao').eq('empresa_id', empresaId).eq('status', 'afastado').order('nome')
     if (error) throw new Error(error.message)

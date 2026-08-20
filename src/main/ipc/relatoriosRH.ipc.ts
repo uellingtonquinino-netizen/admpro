@@ -86,6 +86,30 @@ export function registerRelatoriosRHIpc() {
     `).all(empresa_id)
   })
 
+  // NOVO: relatório específico de vencimento de baixada — pedido do
+  // usuário, com os campos financeiros da ida/volta e alimentação
+  // junto do vencimento, filtrado por período.
+  ipcMain.handle('relatoriosRH:vencimentoBaixada', async (_e, p: { empresa_id: number; inicio: string; fim: string }) => {
+    if(getDatabaseProvider()==='supabase') {
+      const {data,error}=await getSupabase().from('colaboradores')
+        .select('nome,cpf,cidade,valor_ida_volta,alimentacao,data_vencimento_baixada')
+        .eq('empresa_id',p.empresa_id).eq('status','ativo').eq('tem_baixada',1)
+        .not('data_vencimento_baixada','is',null)
+        .gte('data_vencimento_baixada',p.inicio).lte('data_vencimento_baixada',p.fim)
+        .order('data_vencimento_baixada')
+      if(error)throw new Error(error.message)
+      return data ?? []
+    }
+    return db.prepare(`
+      SELECT nome, cpf, cidade, valor_ida_volta, alimentacao, data_vencimento_baixada
+      FROM colaboradores
+      WHERE empresa_id = ? AND status = 'ativo' AND tem_baixada = 1
+        AND data_vencimento_baixada IS NOT NULL
+        AND date(data_vencimento_baixada) BETWEEN date(?) AND date(?)
+      ORDER BY data_vencimento_baixada ASC
+    `).all(p.empresa_id, p.inicio, p.fim)
+  })
+
   // ── 3b. Afastados ────────────────────────────────────────
   // NOVO: colaboradores atualmente afastados (ainda no quadro, mas
   // sem estar trabalhando no momento).
