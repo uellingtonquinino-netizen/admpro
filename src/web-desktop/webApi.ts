@@ -1,5 +1,6 @@
 import { supabase } from './supabaseClient'
 import { VERSAO_CONTRATO, preencherContrato } from '../main/ipc/contratoTemplate'
+import { useEmpresaStore } from '@store/empresa.store'
 
 // NOVO: primeira peça do window.api pro build web-desktop — replica,
 // falando direto com o Supabase (sem processo do Electron no meio), o
@@ -2627,27 +2628,28 @@ async function baixarComoBlob(caminhoStorage: string): Promise<Blob> {
 }
 
 const documentosApi = {
-  // ALTERADO: no desktop, abre o diálogo de impressão nativo. Na web,
-  // não existe — abre o HTML numa aba nova e chama o print() do
-  // próprio navegador (que também deixa "Salvar como PDF"), sem
-  // precisar do serviço de PDF pra esse caso simples (sem anexo).
-  // CORRIGIDO: `document.write` numa aba em branco não estava sendo
-  // interpretado como HTML de verdade em alguns navegadores (mostrava
-  // o código fonte cru, com as tags visíveis, em vez de desenhar a
-  // página) — trocado por um Blob com tipo MIME explícito
-  // (text/html), que garante que o navegador sabe o que está abrindo.
+  // CORRIGIDO: window.print() sempre adiciona o cabeçalho/rodapé
+  // automático do próprio navegador (data/hora + título da página) —
+  // não tem como desligar isso via código, só manualmente na tela de
+  // impressão, o que ninguém vai lembrar de fazer toda vez. Agora usa
+  // o mesmo serviço de PDF da AP/Nota Fiscal (que nunca adiciona
+  // nada extra) e abre o resultado limpo numa aba nova — se a pessoa
+  // quiser imprimir dali, é o próprio visualizador de PDF do
+  // navegador que abre o diálogo, sem esse cabeçalho indesejado.
   imprimir: async (p: { html: string; landscape?: boolean; nomeArquivo?: string }) => {
-    const blob = new Blob([p.html], { type: 'text/html' })
-    const url = URL.createObjectURL(blob)
-    const janela = window.open(url, '_blank')
-    if (!janela) { URL.revokeObjectURL(url); return { ok: false } }
-    janela.addEventListener('load', () => {
-      janela.focus()
-      janela.print()
-      // Espera um pouco antes de liberar a memória do Blob, pra dar
-      // tempo do diálogo de impressão terminar de ler o conteúdo.
-      setTimeout(() => URL.revokeObjectURL(url), 10000)
+    const empresaId = useEmpresaStore.getState().empresaId
+    if (!empresaId) return { ok: false }
+    const resultado = await chamarServicoPdf('/api/gerar-pdf', {
+      html: p.html, landscape: p.landscape, nomeArquivo: p.nomeArquivo ?? 'documento',
+      pastaId: `DOC_${Date.now()}`, empresa_id: empresaId,
     })
+    try {
+      const blob = await baixarComoBlob(resultado.path)
+      const url = URL.createObjectURL(blob)
+      window.open(url, '_blank')
+    } catch {
+      return { ok: false }
+    }
     return { ok: true }
   },
 
