@@ -2285,25 +2285,35 @@ const almoxarifadoEntradasApi = {
 
 // NOVO: usado na tela de Almoxarifado (Saídas) — mesma lógica de
 // almoxarifadoSaidas.ipc.ts (RPCs).
+// CORRIGIDO: minha implementação anterior assumia um produto por
+// saída (esquema antigo) — a tela real já foi atualizada pra suportar
+// vários materiais/ferramentas por saída (tabela separada
+// almoxarifado_saidas_itens), e eu tinha construído isso antes de
+// pegar a versão atual do arquivo. Reescrito igual ao real.
 const almoxarifadoSaidasApi = {
   listar: async (p: { empresa_id: number; busca?: string; dataInicio?: string; dataFim?: string }) => {
-    let q = supabase.from('almoxarifado_saidas').select('*').eq('empresa_id', p.empresa_id).order('data', { ascending: false }).order('id', { ascending: false })
-    if (p.busca) {
-      const termo = p.busca.replace(/[(),.]/g, ' ')
-      q = q.or(`produto_nome.ilike.%${termo}%,produto_codigo.ilike.%${termo}%,retirado_por_nome.ilike.%${termo}%`)
-    }
+    let q = supabase.from('almoxarifado_saidas').select('*,almoxarifado_saidas_itens(*)').eq('empresa_id', p.empresa_id).order('data', { ascending: false }).order('id', { ascending: false })
     if (p.dataInicio && p.dataFim) q = q.gte('data', p.dataInicio).lte('data', p.dataFim)
     const { data, error } = await q
     if (error) throw new Error(error.message)
-    return data ?? []
+    let linhas = (data ?? []).map((s: any) => ({ ...s, itens: s.almoxarifado_saidas_itens }))
+    if (p.busca) {
+      const termo = p.busca.toLowerCase()
+      linhas = linhas.filter((s: any) =>
+        s.retirado_por_nome?.toLowerCase().includes(termo) ||
+        s.itens.some((it: any) => it.produto_nome?.toLowerCase().includes(termo) || it.produto_codigo?.toLowerCase().includes(termo))
+      )
+    }
+    return linhas
   },
   buscarPorId: async (id: number) => {
-    const { data, error } = await supabase.from('almoxarifado_saidas').select('*').eq('id', id).maybeSingle()
+    const { data, error } = await supabase.from('almoxarifado_saidas').select('*,almoxarifado_saidas_itens(*)').eq('id', id).maybeSingle()
     if (error) throw new Error(error.message)
-    return data ?? null
+    return data ? { ...data, itens: (data as any).almoxarifado_saidas_itens } : null
   },
   criar: async (p: {
-    empresa_id: number; data: string; produto_id: number; produto_codigo: string; produto_nome: string; quantidade: number
+    empresa_id: number; data: string
+    itens: { produto_id: number; produto_codigo: string; produto_nome: string; quantidade: number }[]
     retirado_por_tipo: 'colaborador' | 'avulso'; retirado_por_id?: number | null; retirado_por_nome: string
     setor?: string | null; solicitado_por_id?: number | null; solicitado_por_nome?: string | null; liberado_por?: string | null
   }) => {
@@ -2311,7 +2321,6 @@ const almoxarifadoSaidasApi = {
     if (error) throw new Error(error.message)
     return { id: data }
   },
-  // NOVO: sem parte Supabase no original (só SQLite) — implementação equivalente.
   salvarCaminhoPdf: async (p: { id: number; pdf_path: string }) => {
     const { error } = await supabase.from('almoxarifado_saidas').update({ pdf_path: p.pdf_path }).eq('id', p.id)
     if (error) throw new Error(error.message)
