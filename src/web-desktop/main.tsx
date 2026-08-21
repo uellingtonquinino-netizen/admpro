@@ -31,7 +31,7 @@ const ehTelaDeNovaSenha = window.location.hash.startsWith('#/nova-senha')
 // o contrário (useTelaEhMobile.ts). Não se aplica à tela de nova
 // senha, que é simples o bastante pra funcionar em qualquer tamanho.
 const LARGURA_MAXIMA_MOBILE = 820
-const URL_APP_MOBILE = 'https://admpro.vercel.app'
+const URL_APP_MOBILE = 'https://admpro-three.vercel.app'
 
 if (!ehTelaDeNovaSenha && window.innerWidth <= LARGURA_MAXIMA_MOBILE) {
   window.location.href = URL_APP_MOBILE + window.location.hash
