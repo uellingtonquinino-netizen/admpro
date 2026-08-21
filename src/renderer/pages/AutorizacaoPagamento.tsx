@@ -916,7 +916,7 @@ export default function AutorizacaoPagamento() {
                     >
                       <Printer size={15} />
                     </button>
-                    {!lote.aprovado_supervisor_por && podeAprovar && (
+                    {(!lote.aprovado_por ? podeAprovar : usuario?.perfil === 'supervisor') && !lote.aprovado_supervisor_por && (
                       <button
                         onClick={() => handleAutorizarLote(lote)}
                         disabled={autorizandoLoteId === lote.id}
