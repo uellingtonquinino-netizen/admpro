@@ -1,6 +1,3 @@
 {
-  "installCommand": "npm ci --ignore-scripts",
-  "buildCommand": "npm run build:web",
-  "outputDirectory": "dist-web",
   "framework": "vite"
 }
