@@ -192,6 +192,22 @@ export function registerRelatoriosRHIpc() {
     `).all(params)
   })
 
+  // NOVO: mesmo princípio do porSetor, só que filtrando/organizando
+  // por função em vez de setor.
+  ipcMain.handle('relatoriosRH:porFuncao', async (_e, p: { empresa_id: number; funcao?: string }) => {
+    if(getDatabaseProvider()==='supabase') { let q=getSupabase().from('colaboradores').select('nome,funcao,setor').eq('empresa_id',p.empresa_id).eq('status','ativo').order('funcao').order('nome'); if(p.funcao)q=q.eq('funcao',p.funcao); const {data,error}=await q; if(error)throw new Error(error.message); return data }
+    const condsF:  string[] = ['empresa_id = @empresa_id', `status = 'ativo'`]
+    const paramsF: Record<string, unknown> = { empresa_id: p.empresa_id }
+    if (p.funcao) { condsF.push('funcao = @funcao'); paramsF.funcao = p.funcao }
+
+    return db.prepare(`
+      SELECT nome, funcao, setor
+      FROM colaboradores
+      WHERE ${condsF.join(' AND ')}
+      ORDER BY funcao ASC, nome ASC
+    `).all(paramsF)
+  })
+
   // ── 7. Contas bancárias ──────────────────────────────────
   // NOVO: filtro opcional por período de admissão — sem período,
   // mostra todos os colaboradores ativos como antes.

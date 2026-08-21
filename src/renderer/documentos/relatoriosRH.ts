@@ -180,6 +180,18 @@ export function gerarRelatorioPorSetor(empresa: EmpresaInfo, itens: any[], setor
   )
 }
 
+// NOVO: mesmo princípio do relatório Por Setor, só que filtrando/
+// organizando por função em vez de setor.
+export function gerarRelatorioPorFuncao(empresa: EmpresaInfo, itens: any[], funcao: string): string {
+  const linhas = itens.map(c => [c.nome, c.funcao, c.setor])
+  return envolver(
+    'Colaboradores por Função',
+    empresa,
+    `${funcao || 'Todas as funções'} — ${itens.length} colaborador(es)`,
+    tabela(['Nome', 'Função', 'Setor'], linhas)
+  )
+}
+
 // NOVO: colaboradores admitidos dentro de um período — histórico de
 // contratação, independente do status atual.
 const STATUS_LABEL: Record<string, string> = {

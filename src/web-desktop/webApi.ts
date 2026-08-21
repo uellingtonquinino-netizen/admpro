@@ -1447,6 +1447,16 @@ const relatoriosRHApi = {
     return data
   },
 
+  // NOVO: mesmo princípio do porSetor, só que filtrando/organizando
+  // por função em vez de setor.
+  porFuncao: async (p: { empresa_id: number; funcao?: string }) => {
+    let q = supabase.from('colaboradores').select('nome,funcao,setor').eq('empresa_id', p.empresa_id).eq('status', 'ativo').order('funcao').order('nome')
+    if (p.funcao) q = q.eq('funcao', p.funcao)
+    const { data, error } = await q
+    if (error) throw new Error(error.message)
+    return data
+  },
+
   contasBancarias: async (p: { empresa_id: number; inicio?: string; fim?: string } | number) => {
     const params = typeof p === 'number' ? { empresa_id: p } : p
     let q = supabase.from('colaboradores').select('nome,cpf,banco,agencia,conta,conta_digito,tipo_conta').eq('empresa_id', params.empresa_id).eq('status', 'ativo').order('nome')

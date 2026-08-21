@@ -13,11 +13,11 @@ import {
   gerarRelatorioColaboradoresAtivos, gerarRelatorioPorAdmissao, gerarRelatorioVencimentoExperiencia,
   gerarRelatorioAlojados, gerarRelatorioVencimentoBaixada, gerarRelatorioAfastados, gerarRelatorioInativos,
   gerarRelatorioAniversariantes, gerarRelatorioMovimentacao,
-  gerarRelatorioPorSetor, gerarRelatorioContasBancarias,
+  gerarRelatorioPorSetor, gerarRelatorioPorFuncao, gerarRelatorioContasBancarias,
 } from '../documentos/relatoriosRH'
 import { FileText, ClipboardList } from 'lucide-react'
 
-type TipoRelatorio = 'ativos' | 'porAdmissao' | 'experiencia' | 'alojados' | 'vencimentoBaixada' | 'afastados' | 'inativos' | 'aniversariantes' | 'movimentacao' | 'setor' | 'contas'
+type TipoRelatorio = 'ativos' | 'porAdmissao' | 'experiencia' | 'alojados' | 'vencimentoBaixada' | 'afastados' | 'inativos' | 'aniversariantes' | 'movimentacao' | 'setor' | 'funcao' | 'contas'
 
 const TIPOS: { value: TipoRelatorio; label: string }[] = [
   { value: 'ativos',          label: 'Colaboradores ativos' },
@@ -30,6 +30,7 @@ const TIPOS: { value: TipoRelatorio; label: string }[] = [
   { value: 'aniversariantes', label: 'Aniversariantes do mês' },
   { value: 'movimentacao',    label: 'Admissões e desligamentos' },
   { value: 'setor',           label: 'Por Setor' },
+  { value: 'funcao',          label: 'Por Função' },
   { value: 'contas',          label: 'Contas Bancárias' },
 ]
 
@@ -50,6 +51,7 @@ export default function RelatoriosRH() {
 
   const [funcao, setFuncao]   = useState('')
   const [setor, setSetor]     = useState('')
+  const [funcaoRelatorio, setFuncaoRelatorio] = useState('')
   const [equipe, setEquipe]   = useState('')
   const [mes, setMes]         = useState(String(new Date().getMonth() + 1))
   const hoje = new Date().toISOString().slice(0, 10)
@@ -160,6 +162,10 @@ export default function RelatoriosRH() {
         const dados = await window.api.relatoriosRH.porSetor({ empresa_id: empresaId, setor })
         setColunas(['Nome', 'Função', 'Setor'])
         setLinhas(dados.map((c: any) => [c.nome, c.funcao ?? '—', c.setor ?? '—']))
+      } else if (tipo === 'funcao') {
+        const dados = await window.api.relatoriosRH.porFuncao({ empresa_id: empresaId, funcao: funcaoRelatorio })
+        setColunas(['Nome', 'Função', 'Setor'])
+        setLinhas(dados.map((c: any) => [c.nome, c.funcao ?? '—', c.setor ?? '—']))
       } else if (tipo === 'contas') {
         const dados = await window.api.relatoriosRH.contasBancarias({
           empresa_id: empresaId,
@@ -221,6 +227,9 @@ export default function RelatoriosRH() {
       } else if (tipo === 'setor') {
         const dados = await window.api.relatoriosRH.porSetor({ empresa_id: empresaId, setor })
         html = gerarRelatorioPorSetor(empresaAtual, dados, setor)
+      } else if (tipo === 'funcao') {
+        const dados = await window.api.relatoriosRH.porFuncao({ empresa_id: empresaId, funcao: funcaoRelatorio })
+        html = gerarRelatorioPorFuncao(empresaAtual, dados, funcaoRelatorio)
       } else if (tipo === 'contas') {
         const dados = await window.api.relatoriosRH.contasBancarias({
           empresa_id: empresaId,
@@ -310,6 +319,11 @@ export default function RelatoriosRH() {
           {tipo === 'setor' && (
             <Select label="Setor" value={setor} onChange={e => setSetor(e.target.value)}
               options={[{ value: '', label: 'Todos' }, ...opcoes.setores.map(s => ({ value: s, label: s }))]} className="w-56" />
+          )}
+
+          {tipo === 'funcao' && (
+            <Select label="Função" value={funcaoRelatorio} onChange={e => setFuncaoRelatorio(e.target.value)}
+              options={[{ value: '', label: 'Todas' }, ...opcoes.funcoes.map(f => ({ value: f, label: f }))]} className="w-56" />
           )}
 
           {tipo === 'contas' && (
