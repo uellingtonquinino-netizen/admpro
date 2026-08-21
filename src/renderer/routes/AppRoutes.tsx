@@ -3,6 +3,7 @@ import PrivateRoute                 from './PrivateRoute'
 import PermissaoGuard               from '@guards/PermissaoGuard'
 import HomeRedirect                 from '@guards/HomeRedirect'
 import AppLayout                    from '@components/layout/AppLayout'
+import ToastContainer               from '@components/ui/ToastContainer'
 
 // Pages
 import Dashboard     from '@pages/Dashboard'
@@ -52,7 +53,13 @@ import NotFound      from '@pages/NotFound'
 // almoxarife, que não acessa /inicio).
 export default function AppRoutes() {
   return (
-    <Routes>
+    <>
+      {/* CORRIGIDO: estava só dentro do AppLayout (telas já logadas)
+          — Login e Setup, que ficam fora dele, nunca mostravam
+          nenhum aviso de erro (ex: senha errada), mesmo o código já
+          chamando toast.error corretamente. Agora cobre tudo. */}
+      <ToastContainer />
+      <Routes>
       {/* Públicas */}
       <Route path="/login" element={<Login />} />
       <Route path="/setup" element={<Setup />} />
@@ -234,6 +241,7 @@ export default function AppRoutes() {
 
       {/* 404 */}
       <Route path="*" element={<NotFound />} />
-    </Routes>
+      </Routes>
+    </>
   )
 }
