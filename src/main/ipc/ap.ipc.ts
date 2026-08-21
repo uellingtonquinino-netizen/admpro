@@ -173,7 +173,7 @@ export function registerApIpc() {
         const origem: any = a.beneficiario_tipo === 'fornecedor' ? fornecedoresPorId.get(a.beneficiario_id) : colaboradoresPorId.get(a.beneficiario_id)
         const boletosDaAp = (boletos ?? []).filter(b => b.ap_id === a.id)
         return {
-          id: a.id, created_at: a.created_at, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
+          id: a.id, created_at: a.created_at, data_emissao: a.data_emissao, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
           cnpj: a.beneficiario_tipo === 'fornecedor' ? origem?.cnpj ?? null : null,
           cpf: origem?.cpf ?? null,
           forma_pagamento: a.beneficiario_tipo === 'fornecedor' ? origem?.forma_pagamento ?? null : null,
@@ -187,7 +187,7 @@ export function registerApIpc() {
     const placeholders = ap_ids.map(() => '?').join(',')
     return db.prepare(`
       SELECT
-        a.id, a.created_at, a.beneficiario_nome, a.descricao,
+        a.id, a.created_at, a.data_emissao, a.beneficiario_nome, a.descricao,
         CASE WHEN a.beneficiario_tipo = 'fornecedor' THEN f.cnpj ELSE NULL END AS cnpj,
         CASE WHEN a.beneficiario_tipo = 'fornecedor' THEN f.cpf ELSE c.cpf END AS cpf,
         CASE WHEN a.beneficiario_tipo = 'fornecedor' THEN f.forma_pagamento ELSE NULL END AS forma_pagamento,

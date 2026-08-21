@@ -1569,7 +1569,7 @@ const apApi = {
       const bs = (boletos ?? []).filter(b => b.ap_id === a.id).sort((x, y) => x.vencimento.localeCompare(y.vencimento))
       const dadosBancarios = a.beneficiario_tipo === 'fornecedor' ? forn.get(a.beneficiario_id) : colab.get(a.beneficiario_id)
       return {
-        id: a.id, created_at: a.created_at, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
+        id: a.id, created_at: a.created_at, data_emissao: a.data_emissao, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
         cnpj: a.beneficiario_tipo === 'fornecedor' ? dadosBancarios?.cnpj ?? null : null,
         cpf: dadosBancarios?.cpf ?? null,
         forma_pagamento: a.beneficiario_tipo === 'fornecedor' ? (dadosBancarios as any)?.forma_pagamento ?? null : null,
@@ -1927,7 +1927,7 @@ const lotesApi = {
       const b = (boletos ?? []).filter(x => x.ap_id === a.id)
       const r: any = a.beneficiario_tipo === 'fornecedor' ? fs.get(a.beneficiario_id) : cs.get(a.beneficiario_id)
       return {
-        id: a.id, created_at: a.created_at, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
+        id: a.id, created_at: a.created_at, data_emissao: a.data_emissao, beneficiario_nome: a.beneficiario_nome, descricao: a.descricao,
         cnpj: a.beneficiario_tipo === 'fornecedor' ? r?.cnpj ?? null : null, cpf: r?.cpf ?? null,
         forma_pagamento: a.beneficiario_tipo === 'fornecedor' ? r?.forma_pagamento ?? null : null,
         banco: r?.banco ?? null, agencia: r?.agencia ?? null, operacao: r?.operacao ?? null,
