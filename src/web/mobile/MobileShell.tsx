@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react'
 import { apiWeb } from '../api-web'
-import { useTelaEhMobile } from './useTelaEhMobile'
-import DesktopBloqueado from './DesktopBloqueado'
 import MobileLogin from './MobileLogin'
 import MobilePainel from './MobilePainel'
 import MobileColaboradores from './MobileColaboradores'
@@ -15,7 +13,6 @@ type Perfil = Awaited<ReturnType<typeof apiWeb.usuarios.login>>
 interface Obra { id: number; nome: string; estado: string | null }
 
 export default function MobileShell() {
-  const ehMobile = useTelaEhMobile()
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   // NOVO: enquanto ainda não sabe se existe uma sessão válida salva
   // (o Supabase guarda sozinho, em localStorage), mostra um
@@ -137,7 +134,9 @@ export default function MobileShell() {
     setObraSupervisorId(null)
   }
 
-  if (!ehMobile) return <DesktopBloqueado />
+  // ALTERADO: liberado o acesso pelo computador — antes bloqueava
+  // com "Acesse pelo Celular" (DesktopBloqueado.tsx), a pedido do
+  // usuário, quando o acesso via computador ainda não estava pronto.
 
   // NOVO: prioridade máxima — se veio do link de recuperação, mostra
   // a tela de nova senha, não importa se já tinha sessão ou não.
