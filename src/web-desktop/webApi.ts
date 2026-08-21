@@ -560,6 +560,90 @@ const folhaPagamentoApi = {
   // agrupar linhas já espera (mesmo sistema que o pdf.js-extract usa
   // no desktop). Ainda não testado com um PDF real do Pontomais —
   // testar e ajustar se precisar.
+  // NOVO: exporta a folha pro modelo Excel de verdade (mesmo arquivo
+  // que o desktop usa, só que servido publicamente pelo site em vez
+  // de empacotado no programa) — abre o modelo, injeta os valores
+  // nas células certas, preserva toda a formatação original. Mesma
+  // lógica de folhaPagamento.ipc.ts (Electron), só troca leitura/
+  // escrita de arquivo em disco por buffer em memória + download do
+  // navegador.
+  exportarExcel: async (id: number) => {
+    const folha = await folhaPagamentoApi.buscarPorId(id)
+    if (!folha) return { ok: false, erro: 'Folha não encontrada.' }
+    const empresa = await empresas.buscarPorId((folha as any).empresa_id)
+
+    const ExcelJS = await import('exceljs')
+    const workbook = new ExcelJS.Workbook()
+    const resposta = await fetch('/modelo-folha-pagamento.xlsx')
+    if (!resposta.ok) return { ok: false, erro: 'Não foi possível carregar o modelo da planilha.' }
+    await workbook.xlsx.load(await resposta.arrayBuffer())
+    const planilha = workbook.getWorksheet(1)
+    if (!planilha) return { ok: false, erro: 'Modelo da planilha não encontrado.' }
+
+    const CELULA_CODIGO_EMPRESA = 'C3', CELULA_RAZAO_SOCIAL = 'C4', CELULA_CNPJ = 'C5', CELULA_COMPETENCIA = 'C6'
+    const PRIMEIRA_LINHA_DADO = 11
+
+    function competenciaComoSerial(mesCompetencia: string): number {
+      const [ano, mes, dia] = mesCompetencia.split('-').map(Number)
+      const ms = Date.UTC(ano, mes - 1, dia) - Date.UTC(1899, 11, 30)
+      return Math.round(ms / 86400000)
+    }
+    function competenciaComoTexto(mesCompetencia: string): string {
+      const [ano, mes] = mesCompetencia.split('-')
+      const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+      return `${MESES[Number(mes) - 1]}-${ano}`
+    }
+
+    planilha.getCell(CELULA_CODIGO_EMPRESA).value = (empresa as any)?.codigo_empresa ?? ''
+    planilha.getCell(CELULA_RAZAO_SOCIAL).value = (empresa as any)?.razao_social || (empresa as any)?.nome || ''
+    planilha.getCell(CELULA_CNPJ).value = (empresa as any)?.cnpj ?? ''
+    const celulaCompetencia = planilha.getCell(CELULA_COMPETENCIA)
+    celulaCompetencia.value = competenciaComoSerial((folha as any).mes_competencia)
+    celulaCompetencia.numFmt = 'dd/mm/yyyy'
+
+    const itens = (folha as any).itens as any[]
+    const ultimaLinhaModelo = planilha.rowCount
+    const linhasProntas = ultimaLinhaModelo - PRIMEIRA_LINHA_DADO + 1
+    if (itens.length > linhasProntas) {
+      planilha.duplicateRow(ultimaLinhaModelo, itens.length - linhasProntas, true)
+    }
+
+    itens.forEach((item, i) => {
+      const linha = PRIMEIRA_LINHA_DADO + i
+      planilha.getCell(`A${linha}`).value = item.matricula_esocial ? 11 : null
+      planilha.getCell(`B${linha}`).value = item.matricula_esocial || null
+      planilha.getCell(`C${linha}`).value = item.colaborador_nome
+      planilha.getCell(`D${linha}`).value = item.h_premio
+      planilha.getCell(`E${linha}`).value = item.producao
+      planilha.getCell(`F${linha}`).value = item.vale_transporte
+      planilha.getCell(`G${linha}`).value = item.insalubridade
+      planilha.getCell(`H${linha}`).value = item.periculosidade
+      planilha.getCell(`I${linha}`).value = item.adc_noturno
+      planilha.getCell(`J${linha}`).value = item.he_50
+      planilha.getCell(`K${linha}`).value = item.he_80
+      planilha.getCell(`L${linha}`).value = item.he_100
+      planilha.getCell(`M${linha}`).value = item.he_110
+      planilha.getCell(`N${linha}`).value = item.atrasos
+      planilha.getCell(`O${linha}`).value = item.faltas
+      planilha.getCell(`P${linha}`).value = item.outros_eventos
+    })
+
+    const linhaFinalUsada = PRIMEIRA_LINHA_DADO + itens.length - 1
+    for (let l = linhaFinalUsada + 1; l <= planilha.rowCount; l++) {
+      for (let col = 1; col <= 16; col++) planilha.getCell(l, col).value = null
+    }
+
+    const nomeSugerido = `Folha - ${(empresa as any)?.nome || 'Obra'} - ${competenciaComoTexto((folha as any).mes_competencia)}.xlsx`
+    const buffer = await workbook.xlsx.writeBuffer()
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = nomeSugerido
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+    return { ok: true }
+  },
+
   importarEspelhosPonto: async (): Promise<{ canceled?: boolean; ok?: boolean; itens?: any[] }> => {
     const arquivos = await new Promise<File[]>(resolve => {
       const input = document.createElement('input')
