@@ -49,9 +49,11 @@ export function registerAlmoxarifadoEntradasIpc() {
     return { ...entrada, itens }
   })
 
-  // ── Registrar entrada: soma ao estoque, atualiza o valor
-  // unitário do produto (última compra) e lança a despesa
-  // correspondente no Financeiro (mesmo padrão de Nota Fiscal / AP).
+  // ── Registrar entrada: soma ao estoque e atualiza o valor
+  // unitário do produto (última compra). ALTERADO: não lança mais
+  // despesa automática no Financeiro — Despesas/Receitas ficam só
+  // por conta de AP e Nota Fiscal lançadas pelo ADM (pedido do
+  // usuário, antes seguia o mesmo padrão de AP/Nota Fiscal).
   ipcMain.handle('almoxarifadoEntradas:criar', async (_e, p: EntradaPayload) => {
     if (getDatabaseProvider() === 'supabase') {
       const { data, error } = await getSupabase().rpc('criar_entrada_almoxarifado', { p })
@@ -111,22 +113,10 @@ export function registerAlmoxarifadoEntradasIpc() {
         atualizarEstoque.run(item.quantidade, item.valor_unitario, item.produto_id)
       }
 
-      // Lança a despesa no Financeiro — mesmo padrão de AP/Nota
-      // Fiscal: pendente, data de emissão conta no mês, vencimento
-      // igual à data da nota (sem parcelamento por aqui).
-      const resultLanc = db.prepare(`
-        INSERT INTO lancamentos (descricao, tipo, valor, data, data_venc, status, fornecedor_id, empresa_id)
-        VALUES (@descricao, 'despesa', @valor, @data, @data_venc, 'pendente', @fornecedor_id, @empresa_id)
-      `).run({
-        descricao:     `Entrada Almoxarifado ${p.numero_nota ?? ''} - ${p.fornecedor_nome}`.trim(),
-        valor:         total,
-        data:          p.data,
-        data_venc:     p.data,
-        fornecedor_id: p.fornecedor_id ?? null,
-        empresa_id:    p.empresa_id,
-      })
-      db.prepare(`UPDATE almoxarifado_entradas SET lancamento_id = ? WHERE id = ?`)
-        .run(resultLanc.lastInsertRowid, entradaId)
+      // REMOVIDO: entrada de almoxarifado não gera mais lançamento
+      // automático no Financeiro — Despesas/Receitas ficam só por
+      // conta de AP e Nota Fiscal lançadas pelo ADM (pedido do
+      // usuário).
 
       return entradaId
     })
