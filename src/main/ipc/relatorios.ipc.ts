@@ -255,7 +255,7 @@ export function registerRelatoriosIpc() {
       const [apRows, apBoletos, nfRows, nfBoletos, folhas] = await Promise.all([
         supabase.from('autorizacoes_pagamento').select('id,valor').eq('empresa_id', p.empresa_id).gte('data_emissao', p.inicio).lte('data_emissao', p.fim),
         supabase.from('autorizacoes_pagamento_boletos').select('ap_id,valor'),
-        supabase.from('notas_fiscais').select('id,valor').eq('empresa_id', p.empresa_id).gte('data', p.inicio).lte('data', p.fim),
+        supabase.from('notas_fiscais').select('id').eq('empresa_id', p.empresa_id).gte('data', p.inicio).lte('data', p.fim),
         supabase.from('notas_fiscais_boletos').select('nota_id,valor'),
         supabase.from('folhas_pagamento').select('id,mes_competencia').eq('empresa_id', p.empresa_id).gte('mes_competencia', p.inicio.slice(0, 7) + '-01').lte('mes_competencia', p.fim.slice(0, 7) + '-01'),
       ])

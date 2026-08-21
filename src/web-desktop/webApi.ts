@@ -1856,7 +1856,7 @@ const relatoriosApi = {
     const [apRows, apBoletos, nfRows, nfBoletos, folhas] = await Promise.all([
       supabase.from('autorizacoes_pagamento').select('id,valor').eq('empresa_id', p.empresa_id).gte('data_emissao', p.dataInicio).lte('data_emissao', p.dataFim),
       supabase.from('autorizacoes_pagamento_boletos').select('ap_id,valor'),
-      supabase.from('notas_fiscais').select('id,valor').eq('empresa_id', p.empresa_id).gte('data', p.dataInicio).lte('data', p.dataFim),
+      supabase.from('notas_fiscais').select('id').eq('empresa_id', p.empresa_id).gte('data', p.dataInicio).lte('data', p.dataFim),
       supabase.from('notas_fiscais_boletos').select('nota_id,valor'),
       supabase.from('folhas_pagamento').select('id,mes_competencia').eq('empresa_id', p.empresa_id).gte('mes_competencia', p.dataInicio.slice(0, 7) + '-01').lte('mes_competencia', p.dataFim.slice(0, 7) + '-01'),
     ])
