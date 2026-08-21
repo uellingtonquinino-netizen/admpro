@@ -168,7 +168,7 @@ export function gerarCapaAPLote(
       </style>
       ${cabecalhoComLogo(titulo, empresa.logo_url)}
       <p style="text-align:center;color:#555;margin-top:-6px;margin-bottom:14px;">
-        ${nomeExibicaoEmpresa(empresa)} &nbsp;•&nbsp; Emissão ${fmtData(dataEmissao)} &nbsp;•&nbsp; ${itens.length} beneficiário(s) &nbsp;•&nbsp; Emitido em ${hoje()}
+        ${nomeExibicaoEmpresa(empresa)} &nbsp;•&nbsp; Emissão ${fmtData(dataEmissao)} &nbsp;•&nbsp; ${itens.length} beneficiário(s)
       </p>
       ${corpo}
     `,
