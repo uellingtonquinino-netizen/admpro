@@ -64,7 +64,7 @@ export default function SupervisorConfiguracoes() {
     setSalvandoEmail(true)
     try {
       await window.api.usuarios.alterarEmail({ id: usuario.id, senha_atual: senhaParaEmail, novo_email: novoEmail.trim() })
-      toast.success('E-mail alterado. Use o novo e-mail no próximo login.')
+      toast.success('Confira o novo e-mail — mandamos um link de confirmação. A troca só vale depois de clicar nele.')
       setSenhaParaEmail(''); setNovoEmail('')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Erro ao trocar o e-mail.')
