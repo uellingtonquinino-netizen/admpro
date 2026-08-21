@@ -1723,29 +1723,33 @@ const relatoriosRHApi = {
 // NOVO: usado na tela de Relatórios (financeiro) — mesma lógica de
 // relatorios.ipc.ts.
 const relatoriosApi = {
-  evolucaoMensal: async (p: { empresa_id: number; meses?: number }) => {
-    const meses = p.meses ?? 6
-    const { data, error } = await supabase.from('lancamentos').select('tipo,valor,status,data').eq('empresa_id', p.empresa_id).neq('status', 'cancelado')
+  // CORRIGIDO: a tela (Relatorios.tsx) sempre chamou essa função com
+  // {empresa_id, inicio, fim} — a implementação anterior nem aceitava
+  // esses dois parâmetros (só "meses", calculando um período fixo
+  // próprio) — o filtro de período da tela nunca funcionava de
+  // verdade, sempre mostrava os últimos 6 meses a partir de hoje.
+  evolucaoMensal: async (p: { empresa_id: number; inicio: string; fim: string }) => {
+    const { data, error } = await supabase.from('lancamentos').select('tipo,valor,status,data').eq('empresa_id', p.empresa_id).neq('status', 'cancelado').gte('data', p.inicio).lte('data', p.fim)
     if (error) throw new Error(error.message)
-    const hoje = new Date(); hoje.setDate(1)
-    const lista: string[] = []
-    for (let i = meses - 1; i >= 0; i--) {
-      const d = new Date(hoje.getFullYear(), hoje.getMonth() - i, 1)
-      lista.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+    const grupos = new Map<string, { receitas: number; despesas: number }>()
+    for (const l of data ?? []) {
+      const mes = l.data.slice(0, 7)
+      const g = grupos.get(mes) ?? { receitas: 0, despesas: 0 }
+      if (l.tipo === 'receita') g.receitas += Number(l.valor)
+      else g.despesas += Number(l.valor)
+      grupos.set(mes, g)
     }
-    return lista.map(mes => {
-      const doMes = (data ?? []).filter(l => l.data.slice(0, 7) === mes)
-      return {
-        mes,
-        receitas: doMes.filter(l => l.tipo === 'receita').reduce((s, l) => s + Number(l.valor), 0),
-        despesas: doMes.filter(l => l.tipo === 'despesa').reduce((s, l) => s + Number(l.valor), 0),
-      }
-    })
+    return [...grupos.entries()].sort(([a], [b]) => a.localeCompare(b))
+      .map(([mes, g]) => ({ mes, ...g, saldo: g.receitas - g.despesas }))
   },
 
-  topCategorias: async (p: { empresa_id: number; tipo: 'receita' | 'despesa'; dataInicio?: string; dataFim?: string; limite?: number }) => {
+  // CORRIGIDO: nomes de parâmetro não batiam com o que a tela manda
+  // (dataInicio/dataFim/limite em vez de inicio/fim/limit) — o filtro
+  // de período nunca chegava a valer (sempre trazia todo o
+  // histórico), e o limite vinha sempre 10, não os 6 pedidos.
+  topCategorias: async (p: { empresa_id: number; tipo: 'receita' | 'despesa'; inicio?: string; fim?: string; limit?: number }) => {
     let q = supabase.from('lancamentos').select('valor,categoria_id').eq('empresa_id', p.empresa_id).eq('tipo', p.tipo).neq('status', 'cancelado')
-    if (p.dataInicio && p.dataFim) q = q.gte('data', p.dataInicio).lte('data', p.dataFim)
+    if (p.inicio && p.fim) q = q.gte('data', p.inicio).lte('data', p.fim)
     const { data, error } = await q
     if (error) throw new Error(error.message)
     const categoriaIds = [...new Set((data ?? []).map(l => l.categoria_id).filter(Boolean))]
@@ -1763,7 +1767,127 @@ const relatoriosApi = {
       grupos.set(nome, (grupos.get(nome) ?? 0) + Number(l.valor))
     }
     return [...grupos].map(([categoria, total]) => ({ categoria, total, cor: cores.get(categoria) ?? null }))
-      .sort((a, b) => b.total - a.total).slice(0, p.limite ?? 10)
+      .sort((a, b) => b.total - a.total).slice(0, p.limit ?? 10)
+  },
+
+  // NOVO: Relatórios Financeiros detalhados (Despesas por Data, Por
+  // Fornecedor, Por Colaborador, Consolidado) — pedido do usuário.
+  // Mesma base de dados dos gráficos acima (lancamentos), só que numa
+  // lista/tabela detalhada, com filtro de período e pronta pra
+  // imprimir — mesmo padrão dos relatórios de RH.
+
+  despesasPorData: async (p: { empresa_id: number; dataInicio: string; dataFim: string }) => {
+    const { data, error } = await supabase.from('lancamentos')
+      .select('id,descricao,valor,data,data_venc,status,fornecedor_id,categoria_id')
+      .eq('empresa_id', p.empresa_id).eq('tipo', 'despesa').neq('status', 'cancelado')
+      .gte('data', p.dataInicio).lte('data', p.dataFim).order('data')
+    if (error) throw new Error(error.message)
+    const fornecedorIds = [...new Set((data ?? []).map(l => l.fornecedor_id).filter((x): x is number => x !== null))]
+    let fornecedoresRows: any[] = []
+    if (fornecedorIds.length) {
+      const r = await supabase.from('fornecedores').select('id,nome').in('id', fornecedorIds)
+      if (r.error) throw new Error(r.error.message)
+      fornecedoresRows = r.data ?? []
+    }
+    const nomesFornecedor = new Map(fornecedoresRows.map(f => [f.id, f.nome]))
+    return (data ?? []).map(l => ({ ...l, fornecedor_nome: l.fornecedor_id ? nomesFornecedor.get(l.fornecedor_id) ?? null : null }))
+  },
+
+  porFornecedor: async (p: { empresa_id: number; dataInicio: string; dataFim: string }) => {
+    const { data, error } = await supabase.from('lancamentos')
+      .select('valor,fornecedor_id')
+      .eq('empresa_id', p.empresa_id).eq('tipo', 'despesa').neq('status', 'cancelado')
+      .not('fornecedor_id', 'is', null)
+      .gte('data', p.dataInicio).lte('data', p.dataFim)
+    if (error) throw new Error(error.message)
+    const fornecedorIds = [...new Set((data ?? []).map(l => l.fornecedor_id).filter((x): x is number => x !== null))]
+    let fornecedoresRows: any[] = []
+    if (fornecedorIds.length) {
+      const r = await supabase.from('fornecedores').select('id,nome,cnpj,cpf').in('id', fornecedorIds)
+      if (r.error) throw new Error(r.error.message)
+      fornecedoresRows = r.data ?? []
+    }
+    const porId = new Map(fornecedoresRows.map(f => [f.id, f]))
+    const grupos = new Map<number, { fornecedor_nome: string; documento: string | null; total: number; quantidade: number }>()
+    for (const l of data ?? []) {
+      const fid = l.fornecedor_id as number
+      const f = porId.get(fid)
+      const g = grupos.get(fid) ?? { fornecedor_nome: f?.nome ?? 'Fornecedor removido', documento: f?.cnpj ?? f?.cpf ?? null, total: 0, quantidade: 0 }
+      g.total += Number(l.valor); g.quantidade += 1
+      grupos.set(fid, g)
+    }
+    return [...grupos.values()].sort((a, b) => b.total - a.total)
+  },
+
+  // NOVO: pagamentos avulsos feitos DIRETO a colaboradores via
+  // Autorização de Pagamento (ajuda de custo, diária etc) — não inclui
+  // o salário/folha em si (isso é o relatório "consolidado", abaixo).
+  porColaborador: async (p: { empresa_id: number; dataInicio: string; dataFim: string }) => {
+    const { data: aps, error } = await supabase.from('autorizacoes_pagamento')
+      .select('id,beneficiario_id,beneficiario_nome,valor,data_emissao')
+      .eq('empresa_id', p.empresa_id).eq('beneficiario_tipo', 'colaborador')
+      .gte('data_emissao', p.dataInicio).lte('data_emissao', p.dataFim)
+    if (error) throw new Error(error.message)
+    const apIds = (aps ?? []).map(a => a.id)
+    let boletosRows: any[] = []
+    if (apIds.length) {
+      const r = await supabase.from('autorizacoes_pagamento_boletos').select('ap_id,valor').in('ap_id', apIds)
+      if (r.error) throw new Error(r.error.message)
+      boletosRows = r.data ?? []
+    }
+    const grupos = new Map<number, { colaborador_nome: string; total: number; quantidade: number }>()
+    for (const a of aps ?? []) {
+      const boletosDaAp = boletosRows.filter(b => b.ap_id === a.id)
+      const valorAp = boletosDaAp.length ? boletosDaAp.reduce((s, b) => s + Number(b.valor), 0) : Number(a.valor)
+      const cid = a.beneficiario_id as number
+      const g = grupos.get(cid) ?? { colaborador_nome: a.beneficiario_nome, total: 0, quantidade: 0 }
+      g.total += valorAp; g.quantidade += 1
+      grupos.set(cid, g)
+    }
+    return [...grupos.values()].sort((a, b) => b.total - a.total)
+  },
+
+  // NOVO: soma o total de AP's + Notas Fiscais + Folha de Pagamento
+  // (só os adicionais lançados na Folha — h.extra, prêmio etc; não
+  // inclui o salário-base do colaborador, que é um valor fixo/
+  // cadastral, não um "gasto do período" no mesmo sentido) no
+  // período — visão consolidada das 3 principais saídas financeiras.
+  consolidado: async (p: { empresa_id: number; dataInicio: string; dataFim: string }) => {
+    const [apRows, apBoletos, nfRows, nfBoletos, folhas] = await Promise.all([
+      supabase.from('autorizacoes_pagamento').select('id,valor').eq('empresa_id', p.empresa_id).gte('data_emissao', p.dataInicio).lte('data_emissao', p.dataFim),
+      supabase.from('autorizacoes_pagamento_boletos').select('ap_id,valor'),
+      supabase.from('notas_fiscais').select('id,valor').eq('empresa_id', p.empresa_id).gte('data', p.dataInicio).lte('data', p.dataFim),
+      supabase.from('notas_fiscais_boletos').select('nota_id,valor'),
+      supabase.from('folhas_pagamento').select('id,mes_competencia').eq('empresa_id', p.empresa_id).gte('mes_competencia', p.dataInicio.slice(0, 7) + '-01').lte('mes_competencia', p.dataFim.slice(0, 7) + '-01'),
+    ])
+    for (const r of [apRows, apBoletos, nfRows, nfBoletos, folhas]) if (r.error) throw new Error(r.error.message)
+
+    const apIds = new Set((apRows.data ?? []).map(a => a.id))
+    const boletosDeApsNoPeriodo = (apBoletos.data ?? []).filter(b => apIds.has(b.ap_id))
+    const totalAP = (apRows.data ?? []).reduce((soma, a) => {
+      const boletosDaAp = boletosDeApsNoPeriodo.filter(b => b.ap_id === a.id)
+      return soma + (boletosDaAp.length ? boletosDaAp.reduce((s, b) => s + Number(b.valor), 0) : Number(a.valor))
+    }, 0)
+
+    const nfIds = new Set((nfRows.data ?? []).map(n => n.id))
+    const boletosDeNfsNoPeriodo = (nfBoletos.data ?? []).filter(b => nfIds.has(b.nota_id))
+    const totalNF = boletosDeNfsNoPeriodo.reduce((s, b) => s + Number(b.valor), 0)
+
+    const folhaIds = (folhas.data ?? []).map(f => f.id)
+    let totalFolha = 0
+    if (folhaIds.length) {
+      const { data: itens, error } = await supabase.from('folhas_pagamento_itens').select('*').in('folha_id', folhaIds)
+      if (error) throw new Error(error.message)
+      const CAMPOS = ['h_premio', 'producao', 'vale_transporte', 'insalubridade', 'periculosidade', 'adc_noturno', 'he_50', 'he_80', 'he_100', 'he_110', 'outros_eventos'] as const
+      totalFolha = (itens ?? []).reduce((soma, item: any) => soma + CAMPOS.reduce((s, c) => s + (Number(item[c]) || 0), 0), 0)
+    }
+
+    return {
+      totalAP, quantidadeAP: (apRows.data ?? []).length,
+      totalNF, quantidadeNF: (nfRows.data ?? []).length,
+      totalFolha, quantidadeFolha: folhaIds.length,
+      totalGeral: totalAP + totalNF + totalFolha,
+    }
   },
 }
 
