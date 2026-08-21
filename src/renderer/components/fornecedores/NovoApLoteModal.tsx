@@ -160,7 +160,7 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
       // padrão da AP normal (se não aprovado ainda, sem carimbo).
       try {
         const empresaAtual = await window.api.empresas.buscarPorId(empresa.id)
-        const titulo = descricaoPadrao || `Pagamento em Lote — ${new Date(`${dataEmissao}T00:00:00`).toLocaleDateString('pt-BR')}`
+        const titulo = descricaoPadrao || `Autorização de Pagamento em Lote — ${new Date(`${dataEmissao}T00:00:00`).toLocaleDateString('pt-BR')}`
         const html = gerarCapaAPLote(
           { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, dataEmissao,
           itens.map((i, idx) => ({
@@ -189,7 +189,7 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
   }
 
   return (
-    <Modal open onClose={onClose} title="Novo Pagamento em Lote" size="xl">
+    <Modal open onClose={onClose} title="Nova Autorização de Pagamento em Lote" size="xl">
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Input label="Data de Emissão" type="date" value={dataEmissao} onChange={e => setDataEmissao(e.target.value)} />
@@ -283,7 +283,7 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
       <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-surface-border">
         <Button variant="ghost" onClick={onClose} disabled={salvando}>Cancelar</Button>
         <Button icon={<Save size={14} />} onClick={handleSalvar} loading={salvando} disabled={itens.length === 0}>
-          Criar Pagamento em Lote
+          Criar Autorização de Pagamento em Lote
         </Button>
       </div>
     </Modal>
