@@ -907,35 +907,49 @@ export default function AutorizacaoPagamento() {
                       </p>
                     </div>
                   </button>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => handleAbrirPdfLote(lote)}
-                      disabled={abrindoLoteId === lote.id}
-                      title="Ver / Imprimir"
-                      className="p-1.5 rounded-lg text-gray-500 hover:text-brand-400 hover:bg-brand-500/10 transition-colors disabled:opacity-40"
-                    >
-                      <Printer size={15} />
-                    </button>
-                    {(!lote.aprovado_por ? podeAprovar : usuario?.perfil === 'supervisor') && !lote.aprovado_supervisor_por && (
-                      <button
-                        onClick={() => handleAutorizarLote(lote)}
-                        disabled={autorizandoLoteId === lote.id}
-                        title="Autorizar"
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
-                      >
-                        <CheckCircle2 size={15} />
-                      </button>
-                    )}
-                    {!somenteLeitura && (
-                      <button
-                        onClick={() => handleExcluirLote(lote)}
-                        title="Excluir"
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
-                  </div>
+                  {(() => {
+                    const podeAgirAgora = !lote.aprovado_por ? podeAprovar : usuario?.perfil === 'supervisor'
+                    const totalmenteAprovado = !!lote.aprovado_supervisor_por
+                    return (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => handleAbrirPdfLote(lote)}
+                          disabled={abrindoLoteId === lote.id}
+                          title="Ver / Imprimir"
+                          className="p-1.5 rounded-lg text-gray-500 hover:text-brand-400 hover:bg-brand-500/10 transition-colors disabled:opacity-40"
+                        >
+                          <Printer size={15} />
+                        </button>
+                        {totalmenteAprovado ? (
+                          <span title="Totalmente aprovado (Gestor e Supervisor)" className="p-1.5 text-emerald-400">
+                            <CheckCircle2 size={15} />
+                          </span>
+                        ) : podeAgirAgora ? (
+                          <button
+                            onClick={() => handleAutorizarLote(lote)}
+                            disabled={autorizandoLoteId === lote.id}
+                            title="Autorizar"
+                            className="p-1.5 rounded-lg text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                          >
+                            <CheckCircle2 size={15} />
+                          </button>
+                        ) : lote.aprovado_por ? (
+                          <span title={`Já aprovado pelo Gestor (${lote.aprovado_por}) — aguardando Supervisor`} className="p-1.5 text-emerald-400">
+                            <CheckCircle2 size={15} />
+                          </span>
+                        ) : null}
+                        {!somenteLeitura && (
+                          <button
+                            onClick={() => handleExcluirLote(lote)}
+                            title="Excluir"
+                            className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
                 {expandido && (
                   <ApLoteItensExpandido loteId={lote.id} />
