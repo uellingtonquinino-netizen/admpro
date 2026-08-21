@@ -405,6 +405,7 @@ export default function AutorizacaoPagamento() {
         )
         const resultado = await window.api.documentos.salvarPdfInterno({
           html, nomeArquivo: titulo, pastaId: `AP_LOTE_${lote.id}`, empresa_id: empresaId,
+          anexos: (completo.anexos ?? []).map((caminho: string) => ({ caminho })),
         })
         if (!resultado.ok) { toast.error('Erro ao gerar o documento.'); return }
 

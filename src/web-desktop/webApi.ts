@@ -1705,10 +1705,20 @@ const apLoteApi = {
     solicitante?: string | null; autorizado_por?: string | null
     criado_por?: string | null; criado_por_usuario_id?: number | null
     itens: ApLoteItemPayload[]
+    // NOVO: anexos gerais do pagamento em lote (sem carimbo — só a
+    // AP normal precisa disso, aqui é só documentação de apoio).
+    anexos?: { caminho: string; arquivo?: File }[]
   }) => {
-    const { data, error } = await supabase.rpc('criar_ap_lote', { p })
+    const { data, error } = await supabase.rpc('criar_ap_lote', { p: { ...p, anexos: undefined } })
     if (error) throw new Error(error.message)
-    return { id: data }
+    const loteId = data
+    if (p.anexos?.length) {
+      const prontos = await garantirAnexosCaminhoStorage(p.empresa_id, `autorizacoes-pagamento-lote/${loteId}`, p.anexos)
+      const linhas = prontos.map((a, ordem) => ({ autorizacao_lote_id: loteId, caminho: a.caminho, ordem }))
+      const { error: e2 } = await supabase.from('autorizacoes_pagamento_lote_anexos').insert(linhas)
+      if (e2) throw new Error(e2.message)
+    }
+    return { id: loteId }
   },
 
   listar: async (empresaId: number) => {
@@ -1725,12 +1735,14 @@ const apLoteApi = {
   },
 
   buscarPorId: async (id: number) => {
-    const [{ data: lote, error: e1 }, { data: itens, error: e2 }] = await Promise.all([
+    const [{ data: lote, error: e1 }, { data: itens, error: e2 }, { data: anexosRows, error: e3 }] = await Promise.all([
       supabase.from('autorizacoes_pagamento_lote').select('*').eq('id', id).maybeSingle(),
       supabase.from('autorizacoes_pagamento_lote_itens').select('*').eq('autorizacao_lote_id', id).order('ordem'),
+      supabase.from('autorizacoes_pagamento_lote_anexos').select('caminho').eq('autorizacao_lote_id', id).order('ordem'),
     ])
     if (e1) throw new Error(e1.message)
     if (e2) throw new Error(e2.message)
+    if (e3) throw new Error(e3.message)
     if (!lote) return null
     const ids = [lote.aprovado_por_usuario_id, lote.aprovado_supervisor_por_usuario_id].filter((x): x is number => x !== null)
     let carimbos = new Map<number, string | null>()
@@ -1740,7 +1752,7 @@ const apLoteApi = {
       carimbos = new Map((r.data ?? []).map((u: any) => [u.id, u.carimbo_url]))
     }
     return {
-      ...lote, itens: itens ?? [],
+      ...lote, itens: itens ?? [], anexos: (anexosRows ?? []).map(a => a.caminho),
       aprovado_por_carimbo_url: carimbos.get(lote.aprovado_por_usuario_id) ?? null,
       aprovado_supervisor_carimbo_url: carimbos.get(lote.aprovado_supervisor_por_usuario_id) ?? null,
     }

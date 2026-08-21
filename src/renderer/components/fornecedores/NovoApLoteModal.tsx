@@ -7,7 +7,7 @@ import Button                           from '@components/ui/Button'
 import Input                            from '@components/ui/Input'
 import { gerarCapaAPLote }              from '../../documentos/capaLote'
 import { formatCPF, formatCNPJ }        from '../../utils/documentValidators'
-import { Search, Plus, Trash2, Save } from 'lucide-react'
+import { Search, Plus, Trash2, Save, Paperclip } from 'lucide-react'
 
 interface BeneficiarioResumo {
   id: number; nome: string; cnpj?: string | null; cpf?: string | null; tipo_pessoa?: string
@@ -27,6 +27,15 @@ interface ItemLote {
   conta:              string
   conta_digito:       string
   tipo_conta:         string
+}
+
+// NOVO: anexos gerais do pagamento em lote (documentação de apoio) —
+// sem "Vai Assinatura", já que não precisa de carimbo aqui (diferente
+// da AP normal).
+interface Anexo {
+  nome:    string
+  caminho: string
+  arquivo?: File
 }
 
 interface Props {
@@ -56,7 +65,23 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
   const buscaRef = useRef<HTMLDivElement>(null)
 
   const [itens, setItens] = useState<ItemLote[]>([])
+  const [anexos, setAnexos] = useState<Anexo[]>([])
+  const inputArquivoRef = useRef<HTMLInputElement>(null)
   const [salvando, setSalvando] = useState(false)
+
+  function handleSelecionarArquivos(e: React.ChangeEvent<HTMLInputElement>) {
+    const arquivos = Array.from(e.target.files ?? [])
+    const novos: Anexo[] = arquivos.map(f => {
+      const caminhoLocal = (f as unknown as { path?: string }).path
+      return { nome: f.name, caminho: caminhoLocal ?? f.name, arquivo: caminhoLocal ? undefined : f }
+    })
+    setAnexos(prev => [...prev, ...novos])
+    e.target.value = ''
+  }
+
+  function removerAnexo(i: number) {
+    setAnexos(prev => prev.filter((_, idx) => idx !== i))
+  }
 
   useEffect(() => {
     if (!empresa) return
@@ -156,6 +181,7 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
           conta_digito: i.conta_digito || null,
           tipo_conta: i.tipo_conta || null,
         })),
+        anexos: anexos.map(a => ({ caminho: a.caminho, arquivo: a.arquivo })),
       })
 
       // Já gera o documento na hora, pronto pra visualizar — mesmo
@@ -173,6 +199,7 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
         )
         const resultado = await window.api.documentos.salvarPdfInterno({
           html, nomeArquivo: titulo, pastaId: `AP_LOTE_${id}`, empresa_id: empresa.id,
+          anexos: anexos.map(a => ({ caminho: a.caminho, arquivo: a.arquivo })),
         })
         if (resultado.ok) await window.api.apLote.salvarCaminhoPdf({ id, pdf_path: resultado.filePath })
       } catch (erroDoc) {
@@ -285,6 +312,44 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
             Busque acima pra adicionar o primeiro beneficiário.
           </p>
         )}
+
+        {/* NOVO: anexos gerais do pagamento em lote (documentação de
+            apoio) — sem "Vai Assinatura", não precisa de carimbo aqui. */}
+        <div className="border-t border-surface-border pt-4">
+          <p className="text-xs font-semibold text-brand-400 uppercase tracking-wide mb-2">
+            Anexar documentos
+          </p>
+          <input
+            ref={inputArquivoRef}
+            type="file"
+            multiple
+            accept=".pdf,.jpg,.jpeg,.png"
+            onChange={handleSelecionarArquivos}
+            className="hidden"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            icon={<Paperclip size={13} />}
+            onClick={() => inputArquivoRef.current?.click()}
+          >
+            Escolher arquivos
+          </Button>
+
+          {anexos.length > 0 && (
+            <div className="mt-3 space-y-1.5">
+              {anexos.map((a, i) => (
+                <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-hover">
+                  <span className="text-xs text-gray-500 w-4 shrink-0">{i + 1}.</span>
+                  <span className="text-sm text-gray-200 truncate flex-1">{a.nome}</span>
+                  <button onClick={() => removerAnexo(i)} className="p-1 text-gray-500 hover:text-red-400">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-surface-border">
