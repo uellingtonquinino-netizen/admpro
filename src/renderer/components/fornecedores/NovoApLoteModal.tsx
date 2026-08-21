@@ -160,7 +160,7 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
       // padrão da AP normal (se não aprovado ainda, sem carimbo).
       try {
         const empresaAtual = await window.api.empresas.buscarPorId(empresa.id)
-        const titulo = `Pagamento em Lote #${id}`
+        const titulo = descricaoPadrao || `Pagamento em Lote — ${new Date(`${dataEmissao}T00:00:00`).toLocaleDateString('pt-BR')}`
         const html = gerarCapaAPLote(
           { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, dataEmissao,
           itens.map((i, idx) => ({

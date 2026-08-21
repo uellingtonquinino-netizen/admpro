@@ -393,7 +393,7 @@ export default function AutorizacaoPagamento() {
         if (!completo?.itens?.length) { toast.error('Nenhum beneficiário nesse pagamento em lote.'); return }
 
         const empresaAtual = await window.api.empresas.buscarPorId(empresaId)
-        const titulo = `Pagamento em Lote #${lote.id}`
+        const titulo = completo.descricao || `Pagamento em Lote — ${formatDate(completo.data_emissao)}`
         const html = gerarCapaAPLote(
           { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, completo.data_emissao,
           completo.itens.map((i: any, idx: number) => ({
@@ -432,6 +432,24 @@ export default function AutorizacaoPagamento() {
       toast.error(erro instanceof Error ? erro.message : 'Erro ao abrir o pagamento em lote.')
     } finally {
       setAbrindoLoteId(null)
+    }
+  }
+
+  // NOVO: exclui o Pagamento em Lote — remove também os lançamentos
+  // gerados no Financeiro (feito direto pela RPC excluir_ap_lote).
+  async function handleExcluirLote(lote: ApLoteRegistro) {
+    const ok = await confirm({
+      title:   'Excluir Pagamento em Lote',
+      message: `Deseja excluir "${lote.descricao || `pagamento em lote de ${formatDate(lote.data_emissao)}`}"? Os ${lote.quantidade_itens} lançamento(s) no Financeiro também serão removidos.`,
+      danger:  true,
+    })
+    if (!ok) return
+    try {
+      await window.api.apLote.excluir(lote.id)
+      toast.success('Pagamento em lote excluído.')
+      carregarApLotes()
+    } catch (erro) {
+      toast.error(erro instanceof Error ? erro.message : 'Erro ao excluir o pagamento em lote.')
     }
   }
 
@@ -880,7 +898,7 @@ export default function AutorizacaoPagamento() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-semibold text-white truncate">
-                          Pagamento em Lote #{lote.id}{lote.descricao ? ` — ${lote.descricao}` : ''}
+                          {lote.descricao || `Pagamento em Lote — ${formatDate(lote.data_emissao)}`}
                         </p>
                         <Badge color={lote.aprovado_supervisor_por ? 'green' : 'yellow'}>{status}</Badge>
                       </div>
@@ -898,7 +916,7 @@ export default function AutorizacaoPagamento() {
                     >
                       <Printer size={15} />
                     </button>
-                    {!somenteLeitura && !lote.aprovado_supervisor_por && podeAprovar && (
+                    {!lote.aprovado_supervisor_por && podeAprovar && (
                       <button
                         onClick={() => handleAutorizarLote(lote)}
                         disabled={autorizandoLoteId === lote.id}
@@ -906,6 +924,15 @@ export default function AutorizacaoPagamento() {
                         className="p-1.5 rounded-lg text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
                       >
                         <CheckCircle2 size={15} />
+                      </button>
+                    )}
+                    {!somenteLeitura && (
+                      <button
+                        onClick={() => handleExcluirLote(lote)}
+                        title="Excluir"
+                        className="p-1.5 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      >
+                        <Trash2 size={15} />
                       </button>
                     )}
                   </div>
