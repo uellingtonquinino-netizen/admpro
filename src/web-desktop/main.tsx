@@ -23,6 +23,20 @@ import '../renderer/index.css'
 // AppRoutes.tsx compartilhado com o desktop.
 const ehTelaDeNovaSenha = window.location.hash.startsWith('#/nova-senha')
 
+// NOVO: esse build (web-desktop) tem a aparência do programa
+// instalado — não é feito pra tela de celular. Se alguém abrir num
+// aparelho pequeno, manda direto pro app mobile (que já existe,
+// pensado pra isso), em vez de mostrar o layout do desktop
+// espremido. Mesma largura usada pelo próprio app mobile pra decidir
+// o contrário (useTelaEhMobile.ts). Não se aplica à tela de nova
+// senha, que é simples o bastante pra funcionar em qualquer tamanho.
+const LARGURA_MAXIMA_MOBILE = 820
+const URL_APP_MOBILE = 'https://admpro.vercel.app'
+
+if (!ehTelaDeNovaSenha && window.innerWidth <= LARGURA_MAXIMA_MOBILE) {
+  window.location.href = URL_APP_MOBILE + window.location.hash
+}
+
 async function iniciar() {
   const raiz = ReactDOM.createRoot(document.getElementById('root')!)
 
@@ -67,4 +81,11 @@ async function iniciar() {
   }
 }
 
-iniciar()
+// Se está redirecionando pro mobile, não carrega o app desktop por
+// baixo enquanto isso (window.location.href não interrompe o
+// JavaScript na hora, só navega — sem essa checagem, o app inteiro
+// chegaria a montar por um instante antes do navegador trocar de
+// página).
+if (ehTelaDeNovaSenha || window.innerWidth > LARGURA_MAXIMA_MOBILE) {
+  iniciar()
+}
