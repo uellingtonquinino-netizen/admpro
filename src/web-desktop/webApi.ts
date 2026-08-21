@@ -343,9 +343,12 @@ const auth = {
   // normal, perdendo a rota "/nova-senha"). Trocado pra usar "?"
   // (query), que fica intocado — o Supabase só mexe no que vem
   // depois do #.
+  // ALTERADO: não precisa mais tentar embutir uma marcação própria
+  // no link (?recuperar=1) — o Supabase já inclui type=recovery
+  // sozinho nos dados que manda de volta, ver main.tsx.
   solicitarRecuperacaoSenha: async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}${window.location.pathname}?recuperar=1`,
+      redirectTo: `${window.location.origin}${window.location.pathname}`,
     })
     if (error) return { ok: false, erro: error.message }
     return { ok: true }

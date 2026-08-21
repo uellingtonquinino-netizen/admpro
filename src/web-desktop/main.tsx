@@ -26,7 +26,14 @@ import '../renderer/index.css'
 // recuperação — um sobrescrevia o outro. Agora detecta por "?" (o
 // Supabase não mexe nessa parte), ver solicitarRecuperacaoSenha em
 // webApi.ts.
-const ehTelaDeNovaSenha = new URLSearchParams(window.location.search).get('recuperar') === '1'
+// CORRIGIDO (de novo): a tentativa anterior usava ?recuperar=1 —
+// só que o Supabase, ao montar o link final do e-mail, descarta
+// qualquer coisa extra que eu tente embutir no redirectTo, mantendo
+// só o endereço base. A solução robusta é detectar o sinal que o
+// PRÓPRIO Supabase sempre inclui quando é link de recuperação
+// (type=recovery, junto com os tokens, no hash) — isso ele nunca
+// descarta, é o mecanismo dele mesmo.
+const ehTelaDeNovaSenha = window.location.hash.includes('type=recovery')
 
 // NOVO: esse build (web-desktop) tem a aparência do programa
 // instalado — não é feito pra tela de celular. Se alguém abrir num
