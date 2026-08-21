@@ -686,7 +686,7 @@ async function urlAssinada(caminhoSupabase: string): Promise<string> {
 
 const aprovacoes = {
   pendentes: async (p: { empresa_ids: number[]; ehSupervisor: boolean }) => {
-    if (p.empresa_ids.length === 0) return { aps: [], notas: [], lotes: [] }
+    if (p.empresa_ids.length === 0) return { aps: [], notas: [], apsLote: [], lotes: [] }
     let apsQuery = supabase.from('autorizacoes_pagamento')
       .select('id,beneficiario_nome,descricao,valor,created_at,data_emissao,pdf_path,empresa_id,lote_id')
       .in('empresa_id', p.empresa_ids)
@@ -701,12 +701,38 @@ const aprovacoes = {
       ? notasQuery.not('lote_id', 'is', null).is('aprovado_supervisor_por', null)
       : notasQuery.is('aprovado_por', null)
 
-    const [{ data: aps, error: e1 }, { data: notas, error: e2 }] = await Promise.all([
+    // NOVO: Autorização de Pagamento em Lote — mesmo princípio, mas
+    // não passa pelo sistema de lotes_financeiros (é aprovação
+    // própria, direto Gestor→Supervisor), por isso não agrupa junto
+    // com "lotes" abaixo.
+    let apLoteQuery = supabase.from('autorizacoes_pagamento_lote')
+      .select('id,titulo,descricao,data_emissao,pdf_path,empresa_id')
+      .in('empresa_id', p.empresa_ids)
+    apLoteQuery = p.ehSupervisor
+      ? apLoteQuery.not('aprovado_por', 'is', null).is('aprovado_supervisor_por', null)
+      : apLoteQuery.is('aprovado_por', null)
+
+    const [{ data: aps, error: e1 }, { data: notas, error: e2 }, { data: apsLoteRows, error: e4 }] = await Promise.all([
       apsQuery.order('created_at', { ascending: false }),
       notasQuery.order('data', { ascending: false }),
+      apLoteQuery.order('data_emissao', { ascending: false }),
     ])
     if (e1) throw new Error(e1.message)
     if (e2) throw new Error(e2.message)
+    if (e4) throw new Error(e4.message)
+
+    const idsApLote = (apsLoteRows ?? []).map(a => a.id)
+    let itensApLote: { autorizacao_lote_id: number; valor: number }[] = []
+    if (idsApLote.length) {
+      const { data, error: e5 } = await supabase.from('autorizacoes_pagamento_lote_itens').select('autorizacao_lote_id,valor').in('autorizacao_lote_id', idsApLote)
+      if (e5) throw new Error(e5.message)
+      itensApLote = data ?? []
+    }
+    const apsLote = (apsLoteRows ?? []).map(l => ({
+      ...l,
+      quantidade_itens: itensApLote.filter(i => i.autorizacao_lote_id === l.id).length,
+      valor_total: itensApLote.filter(i => i.autorizacao_lote_id === l.id).reduce((s, i) => s + Number(i.valor), 0),
+    }))
 
     // NOVO: pro Supervisor, busca também o título de cada lote
     // envolvido — sem isso a tela mostrava tudo solto, sem
@@ -724,7 +750,7 @@ const aprovacoes = {
       }
     }
 
-    return { aps: aps ?? [], notas: notas ?? [], lotes }
+    return { aps: aps ?? [], notas: notas ?? [], apsLote, lotes }
   },
 
   aprovarAp: async (id: number) => {
@@ -735,6 +761,12 @@ const aprovacoes = {
 
   aprovarNota: async (id: number) => {
     const { error } = await supabase.rpc('aprovar_nota_fiscal', { p_id: id })
+    if (error) throw new Error(error.message)
+    return { ok: true }
+  },
+
+  aprovarApLote: async (id: number) => {
+    const { error } = await supabase.rpc('aprovar_ap_lote', { p_id: id })
     if (error) throw new Error(error.message)
     return { ok: true }
   },
