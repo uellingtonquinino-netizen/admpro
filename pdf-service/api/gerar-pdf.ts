@@ -37,14 +37,29 @@ interface CorpoRequisicao {
   carimbos?:    Carimbo[]
 }
 
-function permitirCors(res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN ?? '*')
+// CORRIGIDO: ALLOWED_ORIGIN era um valor único fixo, mas o site
+// responde tanto em admobra.com quanto www.admobra.com (sem um
+// redirecionar pro outro) — o navegador manda o Origin real de onde
+// a página está sendo vista, e o CORS não aceita "quase igual", só
+// exato. Agora aceita uma lista separada por vírgula, e devolve
+// exatamente a origem que bateu com a da requisição.
+function origensPermitidas(): string[] {
+  return (process.env.ALLOWED_ORIGIN ?? '*').split(',').map(o => o.trim()).filter(Boolean)
+}
+
+function permitirCors(req: VercelRequest, res: VercelResponse) {
+  const permitidas = origensPermitidas()
+  const origemRequisicao = req.headers.origin
+  const origemLiberada = permitidas.includes('*')
+    ? '*'
+    : (origemRequisicao && permitidas.includes(origemRequisicao)) ? origemRequisicao : permitidas[0]
+  res.setHeader('Access-Control-Allow-Origin', origemLiberada)
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  permitirCors(res)
+  permitirCors(req, res)
   if (req.method === 'OPTIONS') { res.status(204).end(); return }
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return }
 

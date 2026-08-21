@@ -19,14 +19,23 @@ interface CorpoRequisicao {
   carimbo:    Carimbo
 }
 
-function permitirCors(res: VercelResponse) {
-  res.setHeader('Access-Control-Allow-Origin', process.env.ALLOWED_ORIGIN ?? '*')
+function origensPermitidas(): string[] {
+  return (process.env.ALLOWED_ORIGIN ?? '*').split(',').map(o => o.trim()).filter(Boolean)
+}
+
+function permitirCors(req: VercelRequest, res: VercelResponse) {
+  const permitidas = origensPermitidas()
+  const origemRequisicao = req.headers.origin
+  const origemLiberada = permitidas.includes('*')
+    ? '*'
+    : (origemRequisicao && permitidas.includes(origemRequisicao)) ? origemRequisicao : permitidas[0]
+  res.setHeader('Access-Control-Allow-Origin', origemLiberada)
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  permitirCors(res)
+  permitirCors(req, res)
   if (req.method === 'OPTIONS') { res.status(204).end(); return }
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return }
 
