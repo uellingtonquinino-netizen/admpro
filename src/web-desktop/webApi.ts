@@ -546,13 +546,173 @@ const folhaPagamentoApi = {
     return { ok: true }
   },
 
-  // PENDENTE: exportarExcel (abre um modelo .xlsx específico
-  // empacotado com o programa) e importarEspelhosPonto (extração de
-  // PDF por posição, feita em Node) ainda não foram portados pra
-  // web — precisam de mais trabalho (o modelo precisa virar um
-  // arquivo público servido pelo site; a extração de PDF precisa
-  // trocar pra versão de navegador do pdfjs). Avisar o usuário
-  // quando ele testar essa tela.
+  // NOVO: importação de espelho de ponto (PDF do Pontomais) — lógica
+  // de extração PORTADA de folhaPagamento.ipc.ts (Electron), célula
+  // por célula, sem alterar o algoritmo em si — só troca a forma de
+  // ler o PDF (pdf.js-extract, que só roda em Node, vira pdfjs-dist
+  // direto, que roda no navegador). Abre um seletor de arquivo (não
+  // existe diálogo nativo na web), lê cada PDF em memória.
+  //
+  // ATENÇÃO: a troca de biblioteca traz uma diferença sutil de
+  // coordenadas — o PDF, por padrão, mede Y de baixo pra cima; aqui
+  // é invertido pra baixo-pra-cima virar cima-pra-baixo (Y crescendo
+  // conforme desce a página), pra bater com o que o algoritmo de
+  // agrupar linhas já espera (mesmo sistema que o pdf.js-extract usa
+  // no desktop). Ainda não testado com um PDF real do Pontomais —
+  // testar e ajustar se precisar.
+  importarEspelhosPonto: async (): Promise<{ canceled?: boolean; ok?: boolean; itens?: any[] }> => {
+    const arquivos = await new Promise<File[]>(resolve => {
+      const input = document.createElement('input')
+      input.type = 'file'; input.accept = '.pdf'; input.multiple = true; input.style.display = 'none'
+      input.onchange = () => { resolve(Array.from(input.files ?? [])); input.remove() }
+      input.oncancel = () => { resolve([]); input.remove() }
+      document.body.appendChild(input); input.click()
+    })
+    if (arquivos.length === 0) return { canceled: true }
+
+    const pdfjsLib = await import('pdfjs-dist')
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
+
+    interface ItemPosicional { x: number; y: number; str: string }
+    interface PaginaExtraida { content: ItemPosicional[] }
+
+    function normalizarTexto(s: string): string {
+      return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim()
+    }
+
+    const PALAVRAS_HE80  = ['h.e. 1', 'h.e.1', 'he1', '(80%)', '80%', 'extra 80']
+    const PALAVRAS_HE100 = ['h.e. 2', 'h.e.2', 'he2', '(100%)', '100%', 'extra 100']
+
+    function agruparEmLinhas(items: ItemPosicional[]): ItemPosicional[][] {
+      const TOLERANCIA_Y = 3
+      const ordenados = [...items].sort((a, b) => a.y - b.y || a.x - b.x)
+      const linhas: ItemPosicional[][] = []
+      for (const item of ordenados) {
+        const ultima = linhas[linhas.length - 1]
+        if (ultima && Math.abs(ultima[0].y - item.y) <= TOLERANCIA_Y) ultima.push(item)
+        else linhas.push([item])
+      }
+      linhas.forEach(l => l.sort((a, b) => a.x - b.x))
+      return linhas
+    }
+
+    function acharColunaPorRotulo(linha: ItemPosicional[], palavras: string[]): ItemPosicional | null {
+      for (const item of linha) {
+        const texto = normalizarTexto(item.str)
+        if (palavras.some(p => texto.includes(p))) return item
+      }
+      return null
+    }
+
+    function valorHoraMaisProximo(linha: ItemPosicional[], xAlvo: number, distanciaMaxima = 40): string | null {
+      let melhor: string | null = null
+      let menorDistancia = Infinity
+      for (const item of linha) {
+        const texto = item.str.trim()
+        if (!/^\d{1,3}:\d{2}$/.test(texto)) continue
+        const distancia = Math.abs(item.x - xAlvo)
+        if (distancia < menorDistancia && distancia <= distanciaMaxima) { menorDistancia = distancia; melhor = texto }
+      }
+      return melhor
+    }
+
+    function extrairColaboradorDoBloco(bloco: ItemPosicional[][]) {
+      const avisos: string[] = []
+      const textoBloco = bloco.map(l => l.map(it => it.str).join(' ')).join('\n')
+      const nome = textoBloco
+        .match(/Nome\s*:?\s*([^\n]+?)(?:\s{2,}|\s+PIS\b|\s+CPF\b|\s+(?:Dom|Seg|Ter|Qua|Qui|Sex|S[aá]b|Dia)\b|$)/i)?.[1]?.trim() ?? null
+      const cpf  = textoBloco.match(/CPF\s*:?\s*([\d.\-]+)/i)?.[1]?.trim() ?? null
+      if (!nome) avisos.push('Não consegui identificar o nome do colaborador nesse bloco — confira manualmente.')
+
+      const indiceTotais = bloco.findIndex(linha => linha.some(it => it.str.trim() === 'TOTAIS'))
+      if (indiceTotais === -1) {
+        avisos.push('Não encontrei a linha "TOTAIS" — os valores de hora extra precisam ser conferidos e lançados manualmente.')
+        const faltas = (textoBloco.match(/Falta(?!ntes)/g) ?? []).length
+        return { nome, cpf, he80: null, he100: null, faltas, avisos }
+      }
+      const linhaTotais = bloco[indiceTotais]
+
+      let colunaHe80: ItemPosicional | null = null
+      let colunaHe100: ItemPosicional | null = null
+      for (let i = 0; i < indiceTotais; i++) {
+        if (!colunaHe80)  colunaHe80  = acharColunaPorRotulo(bloco[i], PALAVRAS_HE80)
+        if (!colunaHe100) colunaHe100 = acharColunaPorRotulo(bloco[i], PALAVRAS_HE100)
+      }
+
+      let he80: string | null = null
+      let he100: string | null = null
+
+      if (colunaHe80) {
+        const valor = valorHoraMaisProximo(linhaTotais, colunaHe80.x)
+        if (valor) he80 = valor.replace(':', ',')
+        else avisos.push('Achei a coluna "H.E.1 (80%)" no cabeçalho, mas não achei um valor de hora alinhado com ela na linha TOTAIS.')
+      } else {
+        avisos.push('Não achei a coluna "H.E.1 (80%)" no cabeçalho desse colaborador — confira se o layout do relatório mudou.')
+      }
+
+      if (colunaHe100) {
+        const valor = valorHoraMaisProximo(linhaTotais, colunaHe100.x)
+        if (valor) he100 = valor.replace(':', ',')
+        else avisos.push('Achei a coluna "H.E.2 (100%)" no cabeçalho, mas não achei um valor de hora alinhado com ela na linha TOTAIS.')
+      } else {
+        avisos.push('Não achei a coluna "H.E.2 (100%)" no cabeçalho desse colaborador — confira se o layout do relatório mudou.')
+      }
+
+      const mencionaExtra = /extra/i.test(textoBloco)
+      if (mencionaExtra && !he80 && !he100) {
+        avisos.push('O documento menciona "extra" em algum lugar, mas nenhum valor de hora extra foi extraído — confira manualmente antes de confirmar.')
+      }
+
+      const faltas = (textoBloco.match(/Falta(?!ntes)/g) ?? []).length
+      return { nome, cpf, he80, he100, faltas, avisos }
+    }
+
+    function extrairEspelhosPorPosicao(paginas: PaginaExtraida[]) {
+      const resultado: ReturnType<typeof extrairColaboradorDoBloco>[] = []
+      for (const pagina of paginas) {
+        const linhas = agruparEmLinhas(pagina.content)
+        const indicesDeInicio: number[] = []
+        linhas.forEach((linha, i) => {
+          const textoLinha = normalizarTexto(linha.map(it => it.str).join(' '))
+          if (/^nome\s+[a-zà-ü]/.test(textoLinha) || linha.some(it => /^nome$/i.test(it.str.trim()))) indicesDeInicio.push(i)
+        })
+        if (indicesDeInicio.length === 0) continue
+        for (let b = 0; b < indicesDeInicio.length; b++) {
+          const inicio = indicesDeInicio[b]
+          const fim = b + 1 < indicesDeInicio.length ? indicesDeInicio[b + 1] : linhas.length
+          resultado.push(extrairColaboradorDoBloco(linhas.slice(inicio, fim)))
+        }
+      }
+      return resultado
+    }
+
+    const lidos: any[] = []
+    for (const arquivo of arquivos) {
+      try {
+        const buffer = await arquivo.arrayBuffer()
+        const documento = await pdfjsLib.getDocument({ data: buffer }).promise
+        const paginas: PaginaExtraida[] = []
+        for (let p = 1; p <= documento.numPages; p++) {
+          const pagina = await documento.getPage(p)
+          const viewport = pagina.getViewport({ scale: 1 })
+          const textContent = await pagina.getTextContent()
+          const content: ItemPosicional[] = (textContent.items as any[])
+            .filter(it => typeof it.str === 'string')
+            .map(it => ({ x: it.transform[4], y: viewport.height - it.transform[5], str: it.str }))
+          paginas.push({ content })
+        }
+        const espelhos = extrairEspelhosPorPosicao(paginas)
+        if (espelhos.length === 0) {
+          lidos.push({ arquivo: arquivo.name, nome: null, cpf: null, he80: null, he100: null, faltas: 0, erro: 'Não achei nenhum colaborador nesse PDF — confere se é um espelho de ponto do Pontomais.', avisos: [] })
+        } else {
+          for (const espelho of espelhos) lidos.push({ arquivo: arquivo.name, ...espelho })
+        }
+      } catch (erro) {
+        lidos.push({ arquivo: arquivo.name, nome: null, cpf: null, he80: null, he100: null, faltas: 0, erro: erro instanceof Error ? erro.message : 'Não foi possível ler esse PDF.', avisos: [] })
+      }
+    }
+    return { ok: true, itens: lidos }
+  },
 }
 
 // NOVO: usado pelo Dashboard (Últimos Lançamentos) — mesma lógica de
