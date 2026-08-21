@@ -29,6 +29,7 @@ import {
 
 interface ApLoteRegistro {
   id:                 number
+  titulo:             string | null
   descricao:          string | null
   data_emissao:       string
   quantidade_itens:   number
@@ -393,7 +394,7 @@ export default function AutorizacaoPagamento() {
         if (!completo?.itens?.length) { toast.error('Nenhum beneficiário nesse pagamento em lote.'); return }
 
         const empresaAtual = await window.api.empresas.buscarPorId(empresaId)
-        const titulo = completo.descricao || `Autorização de Pagamento em Lote — ${formatDate(completo.data_emissao)}`
+        const titulo = completo.titulo || completo.descricao || `Autorização de Pagamento em Lote — ${formatDate(completo.data_emissao)}`
         const html = gerarCapaAPLote(
           { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, completo.data_emissao,
           completo.itens.map((i: any, idx: number) => ({
@@ -440,7 +441,7 @@ export default function AutorizacaoPagamento() {
   async function handleExcluirLote(lote: ApLoteRegistro) {
     const ok = await confirm({
       title:   'Excluir Autorização de Pagamento em Lote',
-      message: `Deseja excluir "${lote.descricao || `pagamento em lote de ${formatDate(lote.data_emissao)}`}"? Os ${lote.quantidade_itens} lançamento(s) no Financeiro também serão removidos.`,
+      message: `Deseja excluir "${lote.titulo || lote.descricao || `pagamento em lote de ${formatDate(lote.data_emissao)}`}"? Os ${lote.quantidade_itens} lançamento(s) no Financeiro também serão removidos.`,
       danger:  true,
     })
     if (!ok) return
@@ -906,7 +907,7 @@ export default function AutorizacaoPagamento() {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-semibold text-white truncate">
-                          {lote.descricao || `Autorização de Pagamento em Lote — ${formatDate(lote.data_emissao)}`}
+                          {lote.titulo || lote.descricao || `Autorização de Pagamento em Lote — ${formatDate(lote.data_emissao)}`}
                         </p>
                         <Badge color={lote.aprovado_supervisor_por ? 'green' : 'yellow'}>{status}</Badge>
                       </div>

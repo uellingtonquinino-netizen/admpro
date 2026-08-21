@@ -44,6 +44,7 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
   const usuario  = useAuthStore(s => s.usuario)
 
   const [dataEmissao, setDataEmissao] = useState(() => new Date().toISOString().slice(0, 10))
+  const [titulo, setTitulo] = useState(() => `Autorização de Pagamento em Lote — ${new Date().toLocaleDateString('pt-BR')}`)
   const [descricaoPadrao, setDescricaoPadrao] = useState('')
   const [solicitante, setSolicitante] = useState(empresa?.solicitante_padrao ?? '')
   const [autorizadoPor, setAutorizadoPor] = useState(empresa?.autorizado_por_padrao ?? '')
@@ -133,6 +134,7 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
     try {
       const { id } = await window.api.apLote.criar({
         empresa_id: empresa.id,
+        titulo: titulo || null,
         descricao: descricaoPadrao || null,
         data_emissao: dataEmissao,
         solicitante: solicitante || null,
@@ -160,7 +162,6 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
       // padrão da AP normal (se não aprovado ainda, sem carimbo).
       try {
         const empresaAtual = await window.api.empresas.buscarPorId(empresa.id)
-        const titulo = descricaoPadrao || `Autorização de Pagamento em Lote — ${new Date(`${dataEmissao}T00:00:00`).toLocaleDateString('pt-BR')}`
         const html = gerarCapaAPLote(
           { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, dataEmissao,
           itens.map((i, idx) => ({
@@ -196,6 +197,12 @@ export default function NovoApLoteModal({ onClose, onSaved }: Props) {
           <Input label="Solicitante" value={solicitante} onChange={e => setSolicitante(e.target.value)} />
           <Input label="Autorizado por" value={autorizadoPor} onChange={e => setAutorizadoPor(e.target.value)} />
         </div>
+
+        <Input
+          label="Título do documento"
+          value={titulo}
+          onChange={e => setTitulo(e.target.value)}
+        />
 
         <Input
           label="Descrição padrão (aplicada a quem for adicionado a partir de agora — cada linha pode ser mudada depois)"

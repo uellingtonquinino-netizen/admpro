@@ -1701,7 +1701,7 @@ interface ApLoteItemPayload {
 }
 const apLoteApi = {
   criar: async (p: {
-    empresa_id: number; descricao?: string | null; data_emissao?: string
+    empresa_id: number; titulo?: string | null; descricao?: string | null; data_emissao?: string
     solicitante?: string | null; autorizado_por?: string | null
     criado_por?: string | null; criado_por_usuario_id?: number | null
     itens: ApLoteItemPayload[]
