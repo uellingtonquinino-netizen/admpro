@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useEmpresaStore }                   from '@store/empresa.store'
 import { useCurrency }                       from '@hooks/useCurrency'
+import { toast }                             from '@components/ui/ToastContainer'
 import PageHeader                            from '@components/layout/PageHeader'
 import Card                                  from '@components/ui/Card'
 import Button                                from '@components/ui/Button'
@@ -110,7 +111,11 @@ export default function Relatorios() {
         despesasPorData: 'Despesas por Data', porFornecedor: 'Despesas por Fornecedor',
         porColaborador: 'Pagamentos a Colaboradores', consolidado: 'Relatório Consolidado',
       }
-      await window.api.documentos.imprimir({ html, nomeArquivo: nomes[tipoDetalhado], landscape: true })
+      const resultado = await window.api.documentos.imprimir({ html, nomeArquivo: nomes[tipoDetalhado], landscape: true })
+      if (!resultado.ok) toast.error('Erro ao gerar o documento — confere o console do navegador (F12) pra ver o motivo.')
+    } catch (erro) {
+      console.error('Erro ao imprimir relatório financeiro:', erro)
+      toast.error(erro instanceof Error ? erro.message : 'Erro ao gerar o documento.')
     } finally {
       setImprimindoDetalhado(false)
     }
@@ -335,7 +340,7 @@ export default function Relatorios() {
               <p className="text-xs text-gray-500 mt-1">{dadosDetalhados.quantidadeNF} nota(s)</p>
             </div>
             <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4">
-              <p className="text-xs text-gray-400 mb-1">Folha de Pagamento (adicionais)</p>
+              <p className="text-xs text-gray-400 mb-1">Folha de Pagamento (salário + adicionais)</p>
               <p className="text-lg font-semibold text-white">{format(dadosDetalhados.totalFolha)}</p>
               <p className="text-xs text-gray-500 mt-1">{dadosDetalhados.quantidadeFolha} folha(s)</p>
             </div>

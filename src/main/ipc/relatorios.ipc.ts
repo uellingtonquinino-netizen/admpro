@@ -249,7 +249,7 @@ export function registerRelatoriosIpc() {
   })
 
   ipcMain.handle('relatorios:consolidado', async (_e, p: PeriodoParams) => {
-    const CAMPOS = ['h_premio', 'producao', 'vale_transporte', 'insalubridade', 'periculosidade', 'adc_noturno', 'he_50', 'he_80', 'he_100', 'he_110', 'outros_eventos'] as const
+    const CAMPOS_SOMA = ['h_premio', 'producao', 'vale_transporte', 'insalubridade', 'periculosidade', 'adc_noturno', 'he_50', 'he_80', 'he_100', 'he_110', 'outros_eventos'] as const
     if (getDatabaseProvider() === 'supabase') {
       const supabase = getSupabase()
       const [apRows, apBoletos, nfRows, nfBoletos, folhas] = await Promise.all([
@@ -273,7 +273,19 @@ export function registerRelatoriosIpc() {
       if (folhaIds.length) {
         const { data: itens, error } = await supabase.from('folhas_pagamento_itens').select('*').in('folha_id', folhaIds)
         if (error) throw new Error(error.message)
-        totalFolha = (itens ?? []).reduce((soma, item: any) => soma + CAMPOS.reduce((s, c) => s + (Number(item[c]) || 0), 0), 0)
+        const colaboradorIds = [...new Set((itens ?? []).map((i: any) => i.colaborador_id).filter(Boolean))]
+        let salariosPorColaborador = new Map<number, number>()
+        if (colaboradorIds.length) {
+          const { data: colabs, error: e2 } = await supabase.from('colaboradores').select('id,salario_base').in('id', colaboradorIds)
+          if (e2) throw new Error(e2.message)
+          salariosPorColaborador = new Map((colabs ?? []).map(c => [c.id, Number(c.salario_base) || 0]))
+        }
+        totalFolha = (itens ?? []).reduce((soma, item: any) => {
+          const salario = salariosPorColaborador.get(item.colaborador_id) ?? 0
+          const adicionais = CAMPOS_SOMA.reduce((s, c) => s + (Number(item[c]) || 0), 0)
+          const descontos = (Number(item.atrasos) || 0) + (Number(item.faltas) || 0)
+          return soma + salario + adicionais - descontos
+        }, 0)
       }
       return { totalAP, quantidadeAP: (apRows.data ?? []).length, totalNF, quantidadeNF: (nfRows.data ?? []).length, totalFolha, quantidadeFolha: folhaIds.length, totalGeral: totalAP + totalNF + totalFolha }
     }
@@ -291,7 +303,13 @@ export function registerRelatoriosIpc() {
     const folhas = db.prepare(`SELECT id FROM folhas_pagamento WHERE empresa_id = @empresa_id AND mes_competencia BETWEEN @mesInicio AND @mesFim`).all({ empresa_id: p.empresa_id, mesInicio, mesFim }) as { id: number }[]
     const totalFolha = folhas.reduce((soma, f) => {
       const itens = db.prepare(`SELECT * FROM folhas_pagamento_itens WHERE folha_id = ?`).all(f.id) as any[]
-      return soma + itens.reduce((s, item) => s + CAMPOS.reduce((s2, c) => s2 + (Number(item[c]) || 0), 0), 0)
+      return soma + itens.reduce((s, item) => {
+        const colab = item.colaborador_id ? (db.prepare(`SELECT salario_base FROM colaboradores WHERE id = ?`).get(item.colaborador_id) as { salario_base: number } | undefined) : undefined
+        const salario = Number(colab?.salario_base) || 0
+        const adicionais = CAMPOS_SOMA.reduce((s2, c) => s2 + (Number(item[c]) || 0), 0)
+        const descontos = (Number(item.atrasos) || 0) + (Number(item.faltas) || 0)
+        return s + salario + adicionais - descontos
+      }, 0)
     }, 0)
     return { totalAP, quantidadeAP: aps.length, totalNF, quantidadeNF: nfs.length, totalFolha, quantidadeFolha: folhas.length, totalGeral: totalAP + totalNF + totalFolha }
   })

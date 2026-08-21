@@ -101,7 +101,7 @@ export function gerarRelatorioConsolidado(
   const linhas = [
     ['Autorizações de Pagamento', String(dados.quantidadeAP), formatMoeda(dados.totalAP)],
     ['Notas Fiscais', String(dados.quantidadeNF), formatMoeda(dados.totalNF)],
-    ['Folha de Pagamento (adicionais)', String(dados.quantidadeFolha) + ' folha(s)', formatMoeda(dados.totalFolha)],
+    ['Folha de Pagamento (salário + adicionais)', String(dados.quantidadeFolha) + ' folha(s)', formatMoeda(dados.totalFolha)],
   ]
   return envolver(
     'Relatório Consolidado',
@@ -109,8 +109,8 @@ export function gerarRelatorioConsolidado(
     `${periodo} — Total geral ${formatMoeda(dados.totalGeral)}`,
     tabela(['Origem', 'Quantidade', 'Total'], linhas) + `
       <p style="margin-top:14px;font-size:10pt;color:#666;">
-        * Folha de Pagamento aqui soma só os adicionais lançados (prêmio, horas extras, insalubridade etc.) —
-        não inclui o salário-base cadastral do colaborador.
+        * Folha de Pagamento soma o salário-base cadastral de cada colaborador (na data de hoje) +
+        os adicionais lançados na folha (prêmio, horas extras, insalubridade etc.) − atrasos e faltas.
       </p>
     `
   )

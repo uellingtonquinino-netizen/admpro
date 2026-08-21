@@ -1878,8 +1878,25 @@ const relatoriosApi = {
     if (folhaIds.length) {
       const { data: itens, error } = await supabase.from('folhas_pagamento_itens').select('*').in('folha_id', folhaIds)
       if (error) throw new Error(error.message)
-      const CAMPOS = ['h_premio', 'producao', 'vale_transporte', 'insalubridade', 'periculosidade', 'adc_noturno', 'he_50', 'he_80', 'he_100', 'he_110', 'outros_eventos'] as const
-      totalFolha = (itens ?? []).reduce((soma, item: any) => soma + CAMPOS.reduce((s, c) => s + (Number(item[c]) || 0), 0), 0)
+      const colaboradorIds = [...new Set((itens ?? []).map((i: any) => i.colaborador_id).filter(Boolean))]
+      let salariosPorColaborador = new Map<number, number>()
+      if (colaboradorIds.length) {
+        const { data: colabs, error: e2 } = await supabase.from('colaboradores').select('id,salario_base').in('id', colaboradorIds)
+        if (e2) throw new Error(e2.message)
+        salariosPorColaborador = new Map((colabs ?? []).map(c => [c.id, Number(c.salario_base) || 0]))
+      }
+      // ALTERADO: agora soma o salário-base do colaborador (do
+      // cadastro) + os adicionais lançados, e desconta atrasos/faltas
+      // (são valores em R$ na folha, não contagem de dias) — total
+      // de verdade do custo de folha no período, não só os
+      // adicionais.
+      const CAMPOS_SOMA = ['h_premio', 'producao', 'vale_transporte', 'insalubridade', 'periculosidade', 'adc_noturno', 'he_50', 'he_80', 'he_100', 'he_110', 'outros_eventos'] as const
+      totalFolha = (itens ?? []).reduce((soma, item: any) => {
+        const salario = salariosPorColaborador.get(item.colaborador_id) ?? 0
+        const adicionais = CAMPOS_SOMA.reduce((s, c) => s + (Number(item[c]) || 0), 0)
+        const descontos = (Number(item.atrasos) || 0) + (Number(item.faltas) || 0)
+        return soma + salario + adicionais - descontos
+      }, 0)
     }
 
     return {
