@@ -224,8 +224,16 @@ export function registerSupabaseUsuariosIpc() {
     return obras ?? []
   })
 
-  ipcMain.handle('usuarios:alterarSenha', async (_event, p: { senha_nova: string }) => {
+  // CORRIGIDO: a tela já pedia "senha atual" no formulário, mas esse
+  // handler ignorava esse campo — só checava o tamanho da senha
+  // nova, e trocava direto. Agora confere de verdade a senha atual
+  // primeiro (mesmo princípio de usuarios:alterarEmail, logo abaixo).
+  ipcMain.handle('usuarios:alterarSenha', async (_event, p: { id: number; senha_atual: string; senha_nova: string }) => {
     if (p.senha_nova.length < 6) throw new Error('A nova senha precisa ter pelo menos 6 caracteres.')
+    const profile = await getCurrentProfile()
+    if (profile.id !== p.id) throw new Error('Não é permitido alterar a senha de outro usuário.')
+    const { error: loginError } = await getSupabase().auth.signInWithPassword({ email: profile.email, password: p.senha_atual })
+    if (loginError) throw new Error('Senha atual incorreta.')
     const { error } = await getSupabase().auth.updateUser({ password: p.senha_nova })
     if (error) throw new Error(error.message)
     return { ok: true }

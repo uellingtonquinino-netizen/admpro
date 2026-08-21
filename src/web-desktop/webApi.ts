@@ -104,8 +104,17 @@ const usuarios = {
     return obras ?? []
   },
 
-  alterarSenha: async (p: { senha_nova: string }) => {
+  // CORRIGIDO: a tela já pedia "senha atual" no formulário, mas essa
+  // função ignorava esse campo — só checava se a senha nova tinha
+  // pelo menos 6 caracteres, e trocava direto. Agora confere de
+  // verdade a senha atual primeiro (mesmo princípio de alterarEmail,
+  // logo abaixo), antes de deixar trocar.
+  alterarSenha: async (p: { id: number; senha_atual: string; senha_nova: string }) => {
     if (p.senha_nova.length < 6) throw new Error('A nova senha precisa ter pelo menos 6 caracteres.')
+    const profile = await getCurrentProfile()
+    if (profile.id !== p.id) throw new Error('Não é permitido alterar a senha de outro usuário.')
+    const { error: loginError } = await supabase.auth.signInWithPassword({ email: profile.email, password: p.senha_atual })
+    if (loginError) throw new Error('Senha atual incorreta.')
     const { error } = await supabase.auth.updateUser({ password: p.senha_nova })
     if (error) throw new Error(error.message)
     return { ok: true }
