@@ -55,7 +55,7 @@ export default function NovaSenhaWeb() {
         {concluido ? (
           <>
             <p className="text-sm text-gray-300">Senha alterada com sucesso.</p>
-            <Button className="w-full" onClick={() => { window.location.hash = '#/'; window.location.reload() }}>
+            <Button className="w-full" onClick={() => { window.location.href = window.location.origin + window.location.pathname }}>
               Ir pro login
             </Button>
           </>

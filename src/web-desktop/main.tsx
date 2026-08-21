@@ -21,7 +21,12 @@ import '../renderer/index.css'
 // Rota especial de "nova senha" (clique no link de recuperação) —
 // tratada ANTES de montar o app inteiro, pra não precisar mexer no
 // AppRoutes.tsx compartilhado com o desktop.
-const ehTelaDeNovaSenha = window.location.hash.startsWith('#/nova-senha')
+// CORRIGIDO: detectava pelo hash (#/nova-senha), mas o Supabase usa
+// essa mesma parte do endereço pros dados de sessão do link de
+// recuperação — um sobrescrevia o outro. Agora detecta por "?" (o
+// Supabase não mexe nessa parte), ver solicitarRecuperacaoSenha em
+// webApi.ts.
+const ehTelaDeNovaSenha = new URLSearchParams(window.location.search).get('recuperar') === '1'
 
 // NOVO: esse build (web-desktop) tem a aparência do programa
 // instalado — não é feito pra tela de celular. Se alguém abrir num

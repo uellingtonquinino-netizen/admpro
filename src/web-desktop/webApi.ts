@@ -336,9 +336,16 @@ const auth = {
     return { ok: true }
   },
 
+  // CORRIGIDO: usava #/nova-senha (parte do endereço depois do #) —
+  // só que o Supabase TAMBÉM usa essa mesma parte pra colocar os
+  // dados de sessão temporária do link de recuperação, e um
+  // sobrescreve o outro (o link chegava, mas caía na tela de login
+  // normal, perdendo a rota "/nova-senha"). Trocado pra usar "?"
+  // (query), que fica intocado — o Supabase só mexe no que vem
+  // depois do #.
   solicitarRecuperacaoSenha: async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}${window.location.pathname}#/nova-senha`,
+      redirectTo: `${window.location.origin}${window.location.pathname}?recuperar=1`,
     })
     if (error) return { ok: false, erro: error.message }
     return { ok: true }
