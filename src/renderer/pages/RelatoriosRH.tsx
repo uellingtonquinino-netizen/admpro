@@ -76,6 +76,7 @@ export default function RelatoriosRH() {
 
   const [colunas, setColunas] = useState<string[]>([])
   const [linhas, setLinhas]   = useState<string[][]>([])
+  const [resumo, setResumo]   = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [gerando, setGerando] = useState(false)
 
@@ -101,6 +102,7 @@ export default function RelatoriosRH() {
     const baixadaInicioUsado = overrideInicio ?? baixadaInicio
     const baixadaFimUsado    = overrideFim ?? baixadaFim
     setLoading(true)
+    setResumo(null)
     try {
       if (tipo === 'ativos') {
         const dados = await window.api.relatoriosRH.colaboradoresAtivos({ empresa_id: empresaId, funcao, setor, equipe })
@@ -166,6 +168,16 @@ export default function RelatoriosRH() {
         const dados = await window.api.relatoriosRH.porFuncao({ empresa_id: empresaId, funcao: funcaoRelatorio })
         setColunas(['Nome', 'Função', 'Setor'])
         setLinhas(dados.map((c: any) => [c.nome, c.funcao ?? '—', c.setor ?? '—']))
+        if (!funcaoRelatorio) {
+          const contagem = new Map<string, number>()
+          for (const c of dados) {
+            const chave = c.funcao || 'Sem função'
+            contagem.set(chave, (contagem.get(chave) ?? 0) + 1)
+          }
+          const partes = [...contagem.entries()].sort((a, b) => b[1] - a[1])
+            .map(([nome, qtd]) => `${qtd} ${nome}${qtd !== 1 ? '(s)' : ''}`)
+          setResumo(partes.length > 0 ? partes.join(' • ') : null)
+        }
       } else if (tipo === 'contas') {
         const dados = await window.api.relatoriosRH.contasBancarias({
           empresa_id: empresaId,
@@ -349,6 +361,12 @@ export default function RelatoriosRH() {
           )}
         </div>
       </div>
+
+      {resumo && !loading && linhas.length > 0 && (
+        <div className="bg-surface border border-surface-border rounded-xl px-4 py-3 mb-3 text-sm text-gray-300">
+          <span className="text-gray-500 font-medium">Resumo:</span> {resumo}
+        </div>
+      )}
 
       {loading ? (
         <SkeletonTable rows={6} cols={colunas.length || 5} />

@@ -181,14 +181,32 @@ export function gerarRelatorioPorSetor(empresa: EmpresaInfo, itens: any[], setor
 }
 
 // NOVO: mesmo princípio do relatório Por Setor, só que filtrando/
-// organizando por função em vez de setor.
+// organizando por função em vez de setor. Quando mostra "Todas as
+// funções" (sem filtro), inclui um resumo contando quantos
+// colaboradores tem em cada função — só a lista solta não dava esse
+// panorama de forma rápida.
 export function gerarRelatorioPorFuncao(empresa: EmpresaInfo, itens: any[], funcao: string): string {
   const linhas = itens.map(c => [c.nome, c.funcao, c.setor])
+
+  let resumoHtml = ''
+  if (!funcao) {
+    const contagem = new Map<string, number>()
+    for (const c of itens) {
+      const chave = c.funcao || 'Sem função'
+      contagem.set(chave, (contagem.get(chave) ?? 0) + 1)
+    }
+    const partes = [...contagem.entries()].sort((a, b) => b[1] - a[1])
+      .map(([nome, qtd]) => `${qtd} ${nome}${qtd !== 1 ? '(s)' : ''}`)
+    if (partes.length > 0) {
+      resumoHtml = `<p style="margin:0 0 14px;font-size:11pt;"><strong>Resumo:</strong> ${partes.join(' &nbsp;•&nbsp; ')}</p>`
+    }
+  }
+
   return envolver(
     'Colaboradores por Função',
     empresa,
     `${funcao || 'Todas as funções'} — ${itens.length} colaborador(es)`,
-    tabela(['Nome', 'Função', 'Setor'], linhas)
+    resumoHtml + tabela(['Nome', 'Função', 'Setor'], linhas)
   )
 }
 
