@@ -135,4 +135,164 @@ export function registerRelatoriosIpc() {
       despesas: number
     }[]
   })
+
+  // NOVO: Relatórios Financeiros detalhados (pedido do usuário) —
+  // mesma lógica da versão web (webApi.ts), usando 'diferente de
+  // cancelado' em vez de 'confirmado' (hoje nenhum lançamento tem
+  // esse status — ficaria sempre vazio; vale investigar depois se
+  // 'confirmado' ainda é usado em algum lugar do fluxo).
+  ipcMain.handle('relatorios:despesasPorData', async (_e, p: PeriodoParams) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const supabase = getSupabase()
+      const { data, error } = await supabase.from('lancamentos')
+        .select('id,descricao,valor,data,data_venc,status,fornecedor_id,categoria_id')
+        .eq('empresa_id', p.empresa_id).eq('tipo', 'despesa').neq('status', 'cancelado')
+        .gte('data', p.inicio).lte('data', p.fim).order('data')
+      if (error) throw new Error(error.message)
+      const fornecedorIds = [...new Set((data ?? []).map(l => l.fornecedor_id).filter((x): x is number => x !== null))]
+      let fornecedoresRows: any[] = []
+      if (fornecedorIds.length) {
+        const r = await supabase.from('fornecedores').select('id,nome').in('id', fornecedorIds)
+        if (r.error) throw new Error(r.error.message)
+        fornecedoresRows = r.data ?? []
+      }
+      const nomesFornecedor = new Map(fornecedoresRows.map(f => [f.id, f.nome]))
+      return (data ?? []).map(l => ({ ...l, fornecedor_nome: l.fornecedor_id ? nomesFornecedor.get(l.fornecedor_id) ?? null : null }))
+    }
+    return db.prepare(`
+      SELECT l.id, l.descricao, l.valor, l.data, l.data_venc, l.status, l.fornecedor_id, l.categoria_id, f.nome AS fornecedor_nome
+      FROM lancamentos l
+      LEFT JOIN fornecedores f ON f.id = l.fornecedor_id
+      WHERE l.empresa_id = @empresa_id AND l.tipo = 'despesa' AND l.status <> 'cancelado'
+        AND l.data BETWEEN @inicio AND @fim
+      ORDER BY l.data ASC
+    `).all(p)
+  })
+
+  ipcMain.handle('relatorios:porFornecedor', async (_e, p: PeriodoParams) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const supabase = getSupabase()
+      const { data, error } = await supabase.from('lancamentos').select('valor,fornecedor_id')
+        .eq('empresa_id', p.empresa_id).eq('tipo', 'despesa').neq('status', 'cancelado')
+        .not('fornecedor_id', 'is', null).gte('data', p.inicio).lte('data', p.fim)
+      if (error) throw new Error(error.message)
+      const fornecedorIds = [...new Set((data ?? []).map(l => l.fornecedor_id).filter((x): x is number => x !== null))]
+      let fornecedoresRows: any[] = []
+      if (fornecedorIds.length) {
+        const r = await supabase.from('fornecedores').select('id,nome,cnpj,cpf').in('id', fornecedorIds)
+        if (r.error) throw new Error(r.error.message)
+        fornecedoresRows = r.data ?? []
+      }
+      const porId = new Map(fornecedoresRows.map(f => [f.id, f]))
+      const grupos = new Map<number, { fornecedor_nome: string; documento: string | null; total: number; quantidade: number }>()
+      for (const l of data ?? []) {
+        const fid = l.fornecedor_id as number
+        const f = porId.get(fid)
+        const g = grupos.get(fid) ?? { fornecedor_nome: f?.nome ?? 'Fornecedor removido', documento: f?.cnpj ?? f?.cpf ?? null, total: 0, quantidade: 0 }
+        g.total += Number(l.valor); g.quantidade += 1
+        grupos.set(fid, g)
+      }
+      return [...grupos.values()].sort((a, b) => b.total - a.total)
+    }
+    return db.prepare(`
+      SELECT f.nome AS fornecedor_nome, COALESCE(f.cnpj, f.cpf) AS documento, SUM(l.valor) AS total, COUNT(*) AS quantidade
+      FROM lancamentos l
+      JOIN fornecedores f ON f.id = l.fornecedor_id
+      WHERE l.empresa_id = @empresa_id AND l.tipo = 'despesa' AND l.status <> 'cancelado'
+        AND l.fornecedor_id IS NOT NULL AND l.data BETWEEN @inicio AND @fim
+      GROUP BY l.fornecedor_id
+      ORDER BY total DESC
+    `).all(p)
+  })
+
+  ipcMain.handle('relatorios:porColaborador', async (_e, p: PeriodoParams) => {
+    if (getDatabaseProvider() === 'supabase') {
+      const supabase = getSupabase()
+      const { data: aps, error } = await supabase.from('autorizacoes_pagamento')
+        .select('id,beneficiario_id,beneficiario_nome,valor,data_emissao')
+        .eq('empresa_id', p.empresa_id).eq('beneficiario_tipo', 'colaborador')
+        .gte('data_emissao', p.inicio).lte('data_emissao', p.fim)
+      if (error) throw new Error(error.message)
+      const apIds = (aps ?? []).map(a => a.id)
+      let boletosRows: any[] = []
+      if (apIds.length) {
+        const r = await supabase.from('autorizacoes_pagamento_boletos').select('ap_id,valor').in('ap_id', apIds)
+        if (r.error) throw new Error(r.error.message)
+        boletosRows = r.data ?? []
+      }
+      const grupos = new Map<number, { colaborador_nome: string; total: number; quantidade: number }>()
+      for (const a of aps ?? []) {
+        const boletosDaAp = boletosRows.filter(b => b.ap_id === a.id)
+        const valorAp = boletosDaAp.length ? boletosDaAp.reduce((s, b) => s + Number(b.valor), 0) : Number(a.valor)
+        const cid = a.beneficiario_id as number
+        const g = grupos.get(cid) ?? { colaborador_nome: a.beneficiario_nome, total: 0, quantidade: 0 }
+        g.total += valorAp; g.quantidade += 1
+        grupos.set(cid, g)
+      }
+      return [...grupos.values()].sort((a, b) => b.total - a.total)
+    }
+    const aps = db.prepare(`
+      SELECT id, beneficiario_id, beneficiario_nome, valor
+      FROM autorizacoes_pagamento
+      WHERE empresa_id = @empresa_id AND beneficiario_tipo = 'colaborador'
+        AND data_emissao BETWEEN @inicio AND @fim
+    `).all(p) as { id: number; beneficiario_id: number; beneficiario_nome: string; valor: number }[]
+    const grupos = new Map<number, { colaborador_nome: string; total: number; quantidade: number }>()
+    for (const a of aps) {
+      const boletos = db.prepare(`SELECT valor FROM autorizacoes_pagamento_boletos WHERE ap_id = ?`).all(a.id) as { valor: number }[]
+      const valorAp = boletos.length ? boletos.reduce((s, b) => s + Number(b.valor), 0) : Number(a.valor)
+      const g = grupos.get(a.beneficiario_id) ?? { colaborador_nome: a.beneficiario_nome, total: 0, quantidade: 0 }
+      g.total += valorAp; g.quantidade += 1
+      grupos.set(a.beneficiario_id, g)
+    }
+    return [...grupos.values()].sort((a, b) => b.total - a.total)
+  })
+
+  ipcMain.handle('relatorios:consolidado', async (_e, p: PeriodoParams) => {
+    const CAMPOS = ['h_premio', 'producao', 'vale_transporte', 'insalubridade', 'periculosidade', 'adc_noturno', 'he_50', 'he_80', 'he_100', 'he_110', 'outros_eventos'] as const
+    if (getDatabaseProvider() === 'supabase') {
+      const supabase = getSupabase()
+      const [apRows, apBoletos, nfRows, nfBoletos, folhas] = await Promise.all([
+        supabase.from('autorizacoes_pagamento').select('id,valor').eq('empresa_id', p.empresa_id).gte('data_emissao', p.inicio).lte('data_emissao', p.fim),
+        supabase.from('autorizacoes_pagamento_boletos').select('ap_id,valor'),
+        supabase.from('notas_fiscais').select('id,valor').eq('empresa_id', p.empresa_id).gte('data', p.inicio).lte('data', p.fim),
+        supabase.from('notas_fiscais_boletos').select('nota_id,valor'),
+        supabase.from('folhas_pagamento').select('id,mes_competencia').eq('empresa_id', p.empresa_id).gte('mes_competencia', p.inicio.slice(0, 7) + '-01').lte('mes_competencia', p.fim.slice(0, 7) + '-01'),
+      ])
+      for (const r of [apRows, apBoletos, nfRows, nfBoletos, folhas]) if (r.error) throw new Error(r.error.message)
+      const apIds = new Set((apRows.data ?? []).map(a => a.id))
+      const boletosDeApsNoPeriodo = (apBoletos.data ?? []).filter(b => apIds.has(b.ap_id))
+      const totalAP = (apRows.data ?? []).reduce((soma, a) => {
+        const boletosDaAp = boletosDeApsNoPeriodo.filter(b => b.ap_id === a.id)
+        return soma + (boletosDaAp.length ? boletosDaAp.reduce((s, b) => s + Number(b.valor), 0) : Number(a.valor))
+      }, 0)
+      const nfIds = new Set((nfRows.data ?? []).map(n => n.id))
+      const totalNF = (nfBoletos.data ?? []).filter(b => nfIds.has(b.nota_id)).reduce((s, b) => s + Number(b.valor), 0)
+      const folhaIds = (folhas.data ?? []).map(f => f.id)
+      let totalFolha = 0
+      if (folhaIds.length) {
+        const { data: itens, error } = await supabase.from('folhas_pagamento_itens').select('*').in('folha_id', folhaIds)
+        if (error) throw new Error(error.message)
+        totalFolha = (itens ?? []).reduce((soma, item: any) => soma + CAMPOS.reduce((s, c) => s + (Number(item[c]) || 0), 0), 0)
+      }
+      return { totalAP, quantidadeAP: (apRows.data ?? []).length, totalNF, quantidadeNF: (nfRows.data ?? []).length, totalFolha, quantidadeFolha: folhaIds.length, totalGeral: totalAP + totalNF + totalFolha }
+    }
+    const aps = db.prepare(`SELECT id, valor FROM autorizacoes_pagamento WHERE empresa_id = @empresa_id AND data_emissao BETWEEN @inicio AND @fim`).all(p) as { id: number; valor: number }[]
+    const totalAP = aps.reduce((soma, a) => {
+      const boletos = db.prepare(`SELECT valor FROM autorizacoes_pagamento_boletos WHERE ap_id = ?`).all(a.id) as { valor: number }[]
+      return soma + (boletos.length ? boletos.reduce((s, b) => s + Number(b.valor), 0) : Number(a.valor))
+    }, 0)
+    const nfs = db.prepare(`SELECT id FROM notas_fiscais WHERE empresa_id = @empresa_id AND data BETWEEN @inicio AND @fim`).all(p) as { id: number }[]
+    const totalNF = nfs.reduce((soma, n) => {
+      const boletos = db.prepare(`SELECT valor FROM notas_fiscais_boletos WHERE nota_id = ?`).all(n.id) as { valor: number }[]
+      return soma + boletos.reduce((s, b) => s + Number(b.valor), 0)
+    }, 0)
+    const mesInicio = p.inicio.slice(0, 7) + '-01', mesFim = p.fim.slice(0, 7) + '-01'
+    const folhas = db.prepare(`SELECT id FROM folhas_pagamento WHERE empresa_id = @empresa_id AND mes_competencia BETWEEN @mesInicio AND @mesFim`).all({ empresa_id: p.empresa_id, mesInicio, mesFim }) as { id: number }[]
+    const totalFolha = folhas.reduce((soma, f) => {
+      const itens = db.prepare(`SELECT * FROM folhas_pagamento_itens WHERE folha_id = ?`).all(f.id) as any[]
+      return soma + itens.reduce((s, item) => s + CAMPOS.reduce((s2, c) => s2 + (Number(item[c]) || 0), 0), 0)
+    }, 0)
+    return { totalAP, quantidadeAP: aps.length, totalNF, quantidadeNF: nfs.length, totalFolha, quantidadeFolha: folhas.length, totalGeral: totalAP + totalNF + totalFolha }
+  })
 }
