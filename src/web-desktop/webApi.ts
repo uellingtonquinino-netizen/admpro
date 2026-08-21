@@ -2221,7 +2221,7 @@ const notasFiscaisApi = {
   capaPorIds: async (notaIds: number[]) => {
     if (notaIds.length === 0) return []
     const [{ data: notas, error: e1 }, { data: boletos, error: e2 }] = await Promise.all([
-      supabase.from('notas_fiscais').select('id,numero_pedido,numero_nf,data_emissao_nf,fornecedor_nome').in('id', notaIds).order('id'),
+      supabase.from('notas_fiscais').select('id,numero_pedido,numero_nf,data,data_emissao_nf,fornecedor_nome').in('id', notaIds).order('id'),
       supabase.from('notas_fiscais_boletos').select('nota_id,valor,vencimento').in('nota_id', notaIds).order('vencimento'),
     ])
     if (e1) throw new Error(e1.message)

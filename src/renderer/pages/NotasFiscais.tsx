@@ -310,7 +310,13 @@ export default function NotasFiscais() {
       }))
 
       const empresaAtual = await window.api.empresas.buscarPorId(empresaId)
-      const titulo = `PROTOCOLO DE NOTAS FISCAIS de ${formatDate(dataInicio)} a ${formatDate(dataFim)}`
+      // CORRIGIDO: o título usava o filtro de data da PÁGINA inteira
+      // — dava errado ao gerar a capa de dentro de um lote específico.
+      // Agora calcula do primeiro ao último documento de verdade.
+      const datasOrdenadas = dados.map((d: any) => d.data_emissao_nf || d.data).filter(Boolean).sort()
+      const dataInicioLote = datasOrdenadas[0]
+      const dataFimLote = datasOrdenadas[datasOrdenadas.length - 1]
+      const titulo = `PROTOCOLO DE NOTAS FISCAIS de ${formatDate(dataInicioLote)} a ${formatDate(dataFimLote)}`
       const html = gerarCapaNotasFiscais(
         { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, itens, format,
       )

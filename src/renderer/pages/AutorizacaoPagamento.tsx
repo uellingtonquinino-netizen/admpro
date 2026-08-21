@@ -532,7 +532,15 @@ export default function AutorizacaoPagamento() {
       }))
 
       const empresaAtual = await window.api.empresas.buscarPorId(empresaId)
-      const titulo = `PROTOCOLO DE AP's de ${formatDate(dataInicio)} a ${formatDate(dataFim)}`
+      // CORRIGIDO: o título usava o filtro de data da PÁGINA inteira,
+      // não as datas reais dos documentos que entraram nessa capa —
+      // dava errado quando a capa era gerada de dentro de um lote
+      // específico (que pode ter documentos de qualquer período).
+      // Agora calcula do primeiro ao último documento de verdade.
+      const datasOrdenadas = itens.map(i => i.data_emissao).filter(Boolean).sort()
+      const dataInicioLote = datasOrdenadas[0]
+      const dataFimLote = datasOrdenadas[datasOrdenadas.length - 1]
+      const titulo = `PROTOCOLO DE AP's de ${formatDate(dataInicioLote)} a ${formatDate(dataFimLote)}`
       const html = gerarCapaLote(
         { nome: empresaAtual.nome, razao_social: empresaAtual.razao_social, logo_url: empresaAtual.logo_url }, titulo, itens, format,
       )
