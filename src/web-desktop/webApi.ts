@@ -47,8 +47,12 @@ async function chamarAdminUsuarios(body: Record<string, unknown>) {
     body, headers: { Authorization: `Bearer ${sessao.session.access_token}` },
   })
   if (error) {
-    const response = (error as { context?: Response }).context
-    if (response) {
+    // CORRIGIDO: error.context nem sempre é um Response de verdade
+    // (depende do tipo de falha — rede, CORS etc.) — chamar .clone()
+    // direto quebrava com "clone is not a function", escondendo a
+    // mensagem de erro real por trás de um erro genérico de código.
+    const response = (error as { context?: unknown }).context
+    if (response instanceof Response) {
       const detalhe = await response.clone().json().catch(() => null) as { error?: string } | null
       if (detalhe?.error) throw new Error(detalhe.error)
     }
