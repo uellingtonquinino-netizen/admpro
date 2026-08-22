@@ -3,8 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ADM OBRA</title>
-    <link rel="icon" type="image/png" href="/public/favicon.png" />
+    <!-- CORRIGIDO: no Vite, arquivos da pasta public/ ficam servidos
+         na raiz do site — o caminho certo é /favicon.png, não
+         /public/favicon.png (senão dá 404). -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/favicon.png" />
+    <title>ADM OBRA — Obra Sob Controle</title>
+    <meta name="description" content="Sistema de gestão de obras: folha de pagamento, financeiro, almoxarifado, documentos e muito mais em um só lugar." />
+
+    <!-- NOVO: aparência ao compartilhar o link (WhatsApp, LinkedIn,
+         Facebook, Slack etc.) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="ADM OBRA" />
+    <meta property="og:title" content="ADM OBRA — Obra Sob Controle" />
+    <meta property="og:description" content="Sistema de gestão de obras: folha de pagamento, financeiro, almoxarifado, documentos e muito mais em um só lugar." />
+    <meta property="og:image" content="https://admobra.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:url" content="https://admobra.com" />
+    <meta property="og:locale" content="pt_BR" />
+
+    <!-- Twitter/X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ADM OBRA — Obra Sob Controle" />
+    <meta name="twitter:description" content="Sistema de gestão de obras: folha de pagamento, financeiro, almoxarifado, documentos e muito mais em um só lugar." />
+    <meta name="twitter:image" content="https://admobra.com/og-image.png" />
   </head>
   <body>
     <div id="root"></div>
